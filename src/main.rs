@@ -37,11 +37,10 @@ pub fn setup_logger(log_thread: bool, rust_log: Option<&str>) {
         let time_str = local_time.to_rfc3339_opts(SecondsFormat::Millis, true);
         write!(
             formatter,
-            "{} {}{: >5} - {} - {}\n",
+            "{} {}{: >5} - {}\n",
             time_str,
             thread_name,
             record.level(),
-            record.target(),
             record.args()
         )
     };
@@ -196,7 +195,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let args = CliArg::parse();
 
     let log_level = args.log_level;
-    setup_logger(true, Some(&log_level));
+    setup_logger(false, Some(&log_level));
     for i in &args.bind {
         info!("{i}");
     }
