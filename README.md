@@ -4,6 +4,12 @@ Rust version of portforwarder built on top of tokio async io
 # Build
 You need to have rust component `x86_64-unknown-linux-musl` to build a static linked binary. You may choose GLIBC dynamic linked library too.
 
+You can add the target by running
+
+```bash
+$ rustup target add x86_64-unknown-linux-musl
+```
+
 To build static binary:
 ```bash
 $ sh ./build.sh
