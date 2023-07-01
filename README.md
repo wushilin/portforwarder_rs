@@ -23,9 +23,10 @@ $ cargo build --release
 
 # Running
 ```bash
-$ target/x86_64-unknown-linux-musl/release/portforwarder -b :443::www.google.com:443 -b :22::www.remote.com:22
+$ target/x86_64-unknown-linux-musl/release/portforwarder -b 0.0.0.0:443::www.google.com:443 -b 0.0.0.0:22::www.remote.com:22
 ```
 
+Unlike the go variant, the bind-address must be specified.
 # Getting help
 
 ```bash
