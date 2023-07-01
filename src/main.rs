@@ -1,28 +1,28 @@
+pub mod statistics;
+pub mod errors;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use log::{error, info, LevelFilter, Record};
 
 use std::io::Write;
 use std::thread;
-
 use chrono::prelude::*;
 use env_logger::fmt::Formatter;
 use env_logger::Builder;
 use std::error::Error;
 use clap::Parser;
 use std::sync::Arc;
-pub mod statistics;
-use statistics::{GlobalStats};
+use statistics::{GlobalStats, ConnStats};
 use std::time::{Duration};
 use bytesize::ByteSize;
 
 #[derive(Parser, Debug, Clone)]
 pub struct CliArg {
-    #[arg(short, long)]
+    #[arg(short, long, help="forward config `bind_ip:bind_port::forward_host:forward_port` format (repeat for multiple)")]
     pub bind: Vec<String>,
-    #[arg(short, long, default_value_t=30000)]
+    #[arg(short, long, default_value_t=30000, help="stats report interval in ms")]
     pub ri: i32,
-    #[arg(long, default_value_t=String::from(""))]
+    #[arg(long, default_value_t=String::from("INFO"), help="log level argument (ERROR INFO WARN DEBUG)")]
     pub log_level: String,
 }
 
@@ -34,10 +34,10 @@ pub fn setup_logger(log_thread: bool, rust_log: Option<&str>) {
             "".to_string()
         };
         let local_time: DateTime<Local> = Local::now();
-        let time_str = local_time.to_rfc3339();
+        let time_str = local_time.to_rfc3339_opts(SecondsFormat::Millis, true);
         write!(
             formatter,
-            "{} {}{} - {} - {}\n",
+            "{} {}{: >5} - {} - {}\n",
             time_str,
             thread_name,
             record.level(),
@@ -56,110 +56,134 @@ pub fn setup_logger(log_thread: bool, rust_log: Option<&str>) {
     builder.init();
 }
 
-async fn run_pair(laddro:String, raddro:String, g_stats:Arc<GlobalStats>) -> Result<(), Box<dyn Error>> {
-    let listener = TcpListener::bind(&laddro).await?;
-    info!("Listening on: {}", &laddro);
+async fn handle_socket_inner(socket:TcpStream, raddr: String, conn_stats:Arc<ConnStats>) -> Result<(), Box<dyn Error>> {
+    let conn_id = conn_stats.id_str();
+    info!("{conn_id} connecting to {raddr}...");
+    let r_stream = TcpStream::connect(raddr).await?;
+    info!("{conn_id} connected.");
+    let (mut lr, mut lw) = tokio::io::split(socket);
+    let (mut rr, mut rw) = tokio::io::split(r_stream);
+
+    // write the header
+    let conn_stats1 = Arc::clone(&conn_stats);
+    let conn_stats2 = Arc::clone(&conn_stats);
+    // L -> R path
+    let jh_lr = tokio::spawn( async move {
+        let direction = ">>>";
+        let mut buf = vec![0; 4096];
+        let conn_id = conn_stats1.id_str();
+        loop {
+            let nr = lr
+                .read(&mut buf)
+                .await;
+            match nr {
+                Err(cause) => {
+                    error!("{conn_id} {direction} failed to read data from socket: {cause}");
+                    return;
+                },
+                _ =>{}
+            }
+    
+            let n = nr.unwrap();
+            if n == 0 {
+                return;
+            }
+    
+            let write_result = rw
+                .write_all(&buf[0..n])
+                .await;
+            match write_result {
+                Err(cause) => {
+                    error!("{conn_id} {direction} failed to write data to socket: {cause}");
+                    break;
+                },
+                Ok(_) => {
+                    conn_stats1.add_uploaded_bytes(n);
+                }
+            }
+        }
+    });
+
+    // R -> L path
+    let jh_rl = tokio::spawn(async move {
+        let direction = "<<<";
+        let conn_id = conn_stats2.id_str();
+        let mut buf = vec![0; 4096];
+        loop {
+            let nr = rr
+                .read(&mut buf)
+                .await;
+    
+            match nr {
+                Err(cause) => {
+                    error!("{conn_id} {direction} failed to read data from socket: {cause}");
+                    return;
+                },
+                _ =>{}
+            }
+            let n = nr.unwrap();
+            if n == 0 {
+                return;
+            }
+    
+            let write_result = lw
+                .write_all(&buf[0..n])
+                .await;
+            match write_result {
+                Err(cause) => {
+                    error!("{conn_id} {direction} failed to write data to socket: {cause}");
+                    break;
+                },
+                Ok(_) => {
+                    conn_stats2.add_downloaded_bytes(n);
+                }
+            }
+        }
+
+    });
+    jh_lr.await?;
+    jh_rl.await?;
+    return Ok(());
+}
+async fn run_pair(bind:String, forward:String, g_stats:Arc<GlobalStats>) -> Result<(), Box<dyn Error>> {
+    let listener = TcpListener::bind(&bind).await?;
+    info!("Listening on: {}", &bind);
 
     loop {
         // Asynchronously wait for an inbound socket.
         let (socket, _) = listener.accept().await?;
         let local_gstats = Arc::clone(&g_stats);
-        let conn_stats = local_gstats.new_conn_stats();
-        let conn_stats1 = Arc::clone(&conn_stats);
-        let conn_stats2 = Arc::clone(&conn_stats);
-        let new_active = g_stats.increase_active_conn_count();
-        let raddr = raddro.clone();
-        let laddr = laddro.clone();
-        let conn_id = conn_stats.id();
-        let conn_id = format!("Connection {conn_id}:");
+        let laddr = bind.clone();
+        let raddr = forward.clone();
         tokio::spawn(async move {
-            let raddr_clone = raddr.clone();
-            let laddr_clone = laddr.clone();
-            let remote_address = socket.peer_addr().unwrap();
-            info!("{conn_id} ({new_active}) started: from {remote_address} via {laddr_clone} to {raddr_clone}");
-            'must_run: {
-                let r_stream_r = TcpStream::connect(raddr).await;
-                if let Err(cause) = r_stream_r.as_ref() {
-                    error!("{conn_id} failed to connect to {laddr_clone}, cause {cause}");
-                    break 'must_run;
-                }
-                let r_stream = r_stream_r.unwrap();
-                let (mut lr, mut lw) = tokio::io::split(socket);
-                let (mut rr, mut rw) = tokio::io::split(r_stream);
-
-                // L -> R path
-                let jh_lr = tokio::spawn( async move {
-                    let mut buf = vec![0; 4096];
-                    loop {
-                        let n = lr
-                            .read(&mut buf)
-                            .await
-                            .expect("failed to read data from socket");
-    
-                        if n == 0 {
-                            return;
-                        }
-    
-                        let write_result = rw
-                            .write_all(&buf[0..n])
-                            .await;
-                        match write_result {
-                            Err(cause) => {
-                                error!("failed to write data to socket: {cause}");
-                                break;
-                            },
-                            Ok(_) => {
-                                conn_stats1.add_uploaded_bytes(n);
-                            }
-                        }
-                    }
-                });
-
-                // R -> L path
-                let jh_rl = tokio::spawn(async move {
-                    let mut buf = vec![0; 4096];
-                    loop {
-                        let n = rr
-                            .read(&mut buf)
-                            .await
-                            .expect("failed to read data from socket");
-    
-                        if n == 0 {
-                            return;
-                        }
-    
-                        let write_result = lw
-                            .write_all(&buf[0..n])
-                            .await;
-                        match write_result {
-                            Err(cause) => {
-                                error!("failed to write data to socket: {cause}");
-                                break;
-                            },
-                            Ok(_) => {
-                                conn_stats2.add_downloaded_bytes(n);
-                            }
-                        }
-                    }
-
-                });
-                jh_lr.await.unwrap();
-                jh_rl.await.unwrap();
-            }
-            let elapsed = conn_stats.elapsed();
-            let downloaded_final_v = conn_stats.downloaded_bytes();
-            let uploaded_final_v = conn_stats.uploaded_bytes();
-            local_gstats.add_downloaded_bytes(downloaded_final_v);
-            local_gstats.add_uploaded_bytes(uploaded_final_v);
-            let downloaded_final = ByteSize(downloaded_final_v as u64);
-            let uploaded_final = ByteSize(uploaded_final_v as u64);
-
-            let new_active = local_gstats.decrease_active_conn_count();
-            info!("{conn_id} ({new_active}) stopped: Downloaded {downloaded_final} bytes, Uploaded {uploaded_final} bytes, Elapsed {elapsed:#?}")
+            //handle_incoming(socket);
+            let _ = handle_socket(socket, laddr, raddr, local_gstats).await;
         });
     }
 }
 
+async fn handle_socket(socket:TcpStream, laddr:String, raddr:String, gstat:Arc<GlobalStats>) {
+    let remote_addr = socket.peer_addr().unwrap();
+    let cstat = Arc::new(ConnStats::new(Arc::clone(&gstat)));
+    let conn_id = cstat.id_str();
+    info!("{conn_id} started: from {remote_addr} via {laddr}");
+    let cstat_clone = Arc::clone(&cstat);
+    let result = handle_socket_inner(socket, raddr, cstat_clone).await;
+    let up_bytes = cstat.uploaded_bytes();
+    let down_bytes = cstat.downloaded_bytes();
+    let up_bytes_str = ByteSize(up_bytes as u64);
+    let down_bytes_str = ByteSize(down_bytes as u64);
+    let elapsed = cstat.elapsed();
+    match result {
+        Err(cause) => {
+            error!("{conn_id} failed. cause: {cause}");
+        },
+        Ok(_) => {
+
+        }
+    }
+    info!("{conn_id} stopped: up {up_bytes_str} down {down_bytes_str} uptime {elapsed:#?}");
+}
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let args = CliArg::parse();
@@ -169,9 +193,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
     for i in &args.bind {
         info!("{i}");
     }
-    // Allow passing an address to listen on as the first argument of this
-    // program, but otherwise we'll just set up our TCP listener on
-    // 127.0.0.1:8080 for connections.
 
     let mut futures = Vec::new();
     let global_stats = statistics::GlobalStats::new();
@@ -179,20 +200,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
     for next_bind in args.bind {
         let tokens = next_bind.split("::").collect::<Vec<&str>>();
         if tokens.len() != 2 {
-            error!("Each bind token must be 2 tokens separated by `::`. `{next_bind}` does not meet the requirement");
-            return Ok(());
+            error!("invalid specification {next_bind}");
+            continue;
         }
-        let laddr = tokens.get(0).unwrap();
-        let raddr = tokens.get(1).unwrap();
-        let laddr = String::from(*laddr);
-        let raddr = String::from(*raddr);
+        let bind_addr = String::from(tokens[0]);
+        let forward_addr = String::from(tokens[1]);
+        let bind_c = next_bind.clone();
         let new_g_stats = Arc::clone(&g_stats);
         let jh = tokio::spawn(async move {
-            let laddr_l = laddr.clone();
-            let raddr_l = raddr.clone();
-            let result = run_pair(laddr, raddr, new_g_stats).await;
+            let result = run_pair(bind_addr, forward_addr, new_g_stats).await;
             if let Err(cause) = result {
-                error!("error forwarding {laddr_l} -> {raddr_l} caused by {cause}");
+                error!("error running tlsproxy for {bind_c} caused by {cause}");
             }
         });
         futures.push(jh);
@@ -206,14 +224,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
             let downloaded = ByteSize(g_stats.total_downloaded_bytes() as u64);
             let uploaded = ByteSize(g_stats.total_uploaded_bytes() as u64);
             let total_conn_count = g_stats.conn_count();
-            info!("**  A-{active}/T-{total_conn_count}/⬆️  {uploaded}/⬇️  {downloaded} **");
+            info!("**  Stats: active: {active} total: {total_conn_count} up: {uploaded} down: {downloaded} **");
         }
     });
     for next_future in futures {
         let _ = next_future.await;
     }
     return Ok(());
-    // Next up we create a TCP listener which will listen for incoming
-    // connections. This TCP listener is bound to the address we determined
-    // above and must be associated with an event loop.
 }

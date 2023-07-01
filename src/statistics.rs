@@ -7,32 +7,49 @@ pub struct ConnStats {
     start: Instant,
     uploaded_bytes: Arc<AtomicUsize>,
     downloaded_bytes: Arc<AtomicUsize>,
+    global_stats: Arc<GlobalStats>,
 }
 
 impl ConnStats {
-    pub fn new(id:usize) -> ConnStats {
-        return ConnStats {
-            id,
+    pub fn new(gstat:Arc<GlobalStats>) -> ConnStats {
+        gstat.increase_conn_count();
+        gstat.increase_active_conn_count();
+        let result = ConnStats{
+            id: gstat.gen_conn_id(),
             start: Instant::now(),
             uploaded_bytes: new_au(0),
             downloaded_bytes: new_au(0),
-        }
+            global_stats: Arc::clone(&gstat),
+        };
+        return result;
     }
 
     pub fn elapsed(&self) -> Duration {
         return self.start.elapsed();
     }
 
+    pub fn get_global_stats(&self) -> Arc<GlobalStats> {
+        return Arc::clone(&self.global_stats);
+    }
+
+    pub fn id_str(&self) -> String {
+        let id = self.id;
+        return format!("conn {id}");
+    }
     pub fn id(&self) -> usize {
         return self.id;
     }
 
     pub fn add_downloaded_bytes(&self, new: usize) -> usize {
-        return self.downloaded_bytes.fetch_add(new, Ordering::SeqCst) + new;
+        let result = self.downloaded_bytes.fetch_add(new, Ordering::SeqCst) + new;
+        self.global_stats.add_downloaded_bytes(new);
+        return result;
     }
 
     pub fn add_uploaded_bytes(&self, new: usize) -> usize {
-        return self.uploaded_bytes.fetch_add(new, Ordering::SeqCst) + new;
+        let result = self.uploaded_bytes.fetch_add(new, Ordering::SeqCst) + new;
+        self.global_stats.add_uploaded_bytes(new);
+        return result;
     }
 
     pub fn downloaded_bytes(&self) -> usize {
@@ -45,13 +62,19 @@ impl ConnStats {
 
 }
 
+impl Drop for ConnStats {
+    fn drop(&mut self) {
+        self.global_stats.decrease_active_conn_count();
+    }
+}
 impl Clone for ConnStats {
     fn clone(&self) -> ConnStats {
         return ConnStats { 
             id: self.id,
             start: self.start, 
             uploaded_bytes: Arc::clone(&self.uploaded_bytes), 
-            downloaded_bytes: Arc::clone(&self.downloaded_bytes) 
+            downloaded_bytes: Arc::clone(&self.downloaded_bytes),
+            global_stats: Arc::clone(&self.global_stats),
         };
     }
 }
@@ -91,15 +114,11 @@ impl GlobalStats {
         };
     }
 
-    pub fn new_conn_stats(&self)->Arc<ConnStats> {
-        self.increase_conn_count();
-        return Arc::new(ConnStats::new(self.gen_conn_id()));
-    }
-    pub fn gen_conn_id(&self) -> usize {
+    fn gen_conn_id(&self) -> usize {
         return self.id_gen.fetch_add(1, Ordering::SeqCst) + 1;
     }
 
-    pub fn increase_conn_count(&self) -> usize {
+    fn increase_conn_count(&self) -> usize {
         return self.conn_count.fetch_add(1, Ordering::SeqCst) + 1;
     }
 
@@ -107,11 +126,11 @@ impl GlobalStats {
         return self.conn_count.load(Ordering::SeqCst);
     }
 
-    pub fn increase_active_conn_count(&self) -> usize {
+    fn increase_active_conn_count(&self) -> usize {
         return self.active_conn_count.fetch_add(1, Ordering::SeqCst) + 1;
     }
 
-    pub fn decrease_active_conn_count(&self) -> usize {
+    fn decrease_active_conn_count(&self) -> usize {
         return self.active_conn_count.fetch_sub(1, Ordering::SeqCst) - 1;
     }
 
@@ -119,7 +138,7 @@ impl GlobalStats {
         return self.active_conn_count.load(Ordering::SeqCst);
     }
 
-    pub fn add_downloaded_bytes(&self, new: usize) -> usize {
+    fn add_downloaded_bytes(&self, new: usize) -> usize {
         return self.total_downloaded_bytes.fetch_add(new, Ordering::SeqCst) + new;
     }
 
@@ -127,7 +146,7 @@ impl GlobalStats {
         return self.total_downloaded_bytes.load(Ordering::SeqCst);
     }
 
-    pub fn add_uploaded_bytes(&self, new: usize) -> usize {
+    fn add_uploaded_bytes(&self, new: usize) -> usize {
         return self.total_uploaded_bytes.fetch_add(new, Ordering::SeqCst) + new;
     }
 
