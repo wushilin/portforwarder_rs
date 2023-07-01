@@ -196,8 +196,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let log_level = args.log_level;
     setup_logger(false, Some(&log_level));
+
+    if args.bind.len() == 0 {
+        error!("no binding config specified. please specify using `-b` or `--bind`");
+        return Ok(());
+    }
     for i in &args.bind {
-        info!("{i}");
+        info!("Binding config: {i}");
     }
 
     let mut futures = Vec::new();
