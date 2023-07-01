@@ -100,11 +100,18 @@ async fn run_pair(laddro:String, raddro:String, g_stats:Arc<GlobalStats>) -> Res
                             return;
                         }
     
-                        rw
+                        let write_result = rw
                             .write_all(&buf[0..n])
-                            .await
-                            .expect("failed to write data to socket");
-                        conn_stats1.add_uploaded_bytes(n);
+                            .await;
+                        match write_result {
+                            Err(cause) => {
+                                error!("failed to write data to socket: {cause}");
+                                break;
+                            },
+                            Ok(_) => {
+                                conn_stats1.add_uploaded_bytes(n);
+                            }
+                        }
                     }
                 });
 
@@ -121,11 +128,18 @@ async fn run_pair(laddro:String, raddro:String, g_stats:Arc<GlobalStats>) -> Res
                             return;
                         }
     
-                        lw
+                        let write_result = lw
                             .write_all(&buf[0..n])
-                            .await
-                            .expect("failed to write data to socket");
-                        conn_stats2.add_downloaded_bytes(n);
+                            .await;
+                        match write_result {
+                            Err(cause) => {
+                                error!("failed to write data to socket: {cause}");
+                                break;
+                            },
+                            Ok(_) => {
+                                conn_stats2.add_downloaded_bytes(n);
+                            }
+                        }
                     }
 
                 });
