@@ -163,9 +163,14 @@ async fn run_pair(bind:String, forward:String, g_stats:Arc<GlobalStats>) -> Resu
 }
 
 async fn handle_socket(socket:TcpStream, laddr:String, raddr:String, gstat:Arc<GlobalStats>) {
-    let remote_addr = socket.peer_addr().unwrap();
     let cstat = Arc::new(ConnStats::new(Arc::clone(&gstat)));
     let conn_id = cstat.id_str();
+    let remote_addr = socket.peer_addr();
+    if remote_addr.is_err() {
+        error!("{conn_id} has no remote peer info. closed");
+        return;
+    } 
+    let remote_addr = remote_addr.unwrap();
     info!("{conn_id} started: from {remote_addr} via {laddr}");
     let cstat_clone = Arc::clone(&cstat);
     let result = handle_socket_inner(socket, raddr, cstat_clone).await;
