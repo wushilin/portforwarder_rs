@@ -1,26 +1,35 @@
-pub mod statistics;
 pub mod errors;
+pub mod statistics;
+use log::{error, info, LevelFilter, Record};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
-use log::{error, info, LevelFilter, Record};
 
-use std::io::Write;
-use std::thread;
+use bytesize::ByteSize;
 use chrono::prelude::*;
+use clap::Parser;
 use env_logger::fmt::Formatter;
 use env_logger::Builder;
+use statistics::{ConnStats, GlobalStats};
 use std::error::Error;
-use clap::Parser;
+use std::io::Write;
 use std::sync::Arc;
-use statistics::{GlobalStats, ConnStats};
-use std::time::{Duration};
-use bytesize::ByteSize;
+use std::thread;
+use std::time::Duration;
 
 #[derive(Parser, Debug, Clone)]
 pub struct CliArg {
-    #[arg(short, long, help="forward config `bind_ip:bind_port::forward_host:forward_port` format (repeat for multiple)")]
+    #[arg(
+        short,
+        long,
+        help = "forward config `bind_ip:bind_port::forward_host:forward_port` format (repeat for multiple)"
+    )]
     pub bind: Vec<String>,
-    #[arg(short, long, default_value_t=30000, help="stats report interval in ms")]
+    #[arg(
+        short,
+        long,
+        default_value_t = 30000,
+        help = "stats report interval in ms"
+    )]
     pub ri: i32,
     #[arg(long, default_value_t=String::from("INFO"), help="log level argument (ERROR INFO WARN DEBUG)")]
     pub log_level: String,
@@ -55,7 +64,11 @@ pub fn setup_logger(log_thread: bool, rust_log: Option<&str>) {
     builder.init();
 }
 
-async fn handle_socket_inner(socket:TcpStream, raddr: String, conn_stats:Arc<ConnStats>) -> Result<(), Box<dyn Error>> {
+async fn handle_socket_inner(
+    socket: TcpStream,
+    raddr: String,
+    conn_stats: Arc<ConnStats>,
+) -> Result<(), Box<dyn Error>> {
     let conn_id = conn_stats.id_str();
     info!("{conn_id} connecting to {raddr}...");
     let r_stream = TcpStream::connect(raddr).await?;
@@ -67,35 +80,31 @@ async fn handle_socket_inner(socket:TcpStream, raddr: String, conn_stats:Arc<Con
     let conn_stats1 = Arc::clone(&conn_stats);
     let conn_stats2 = Arc::clone(&conn_stats);
     // L -> R path
-    let jh_lr = tokio::spawn( async move {
+    let jh_lr = tokio::spawn(async move {
         let direction = ">>>";
         let mut buf = vec![0; 4096];
         let conn_id = conn_stats1.id_str();
         loop {
-            let nr = lr
-                .read(&mut buf)
-                .await;
+            let nr = lr.read(&mut buf).await;
             match nr {
                 Err(cause) => {
                     error!("{conn_id} {direction} failed to read data from socket: {cause}");
                     return;
-                },
-                _ =>{}
+                }
+                _ => {}
             }
-    
+
             let n = nr.unwrap();
             if n == 0 {
                 return;
             }
-    
-            let write_result = rw
-                .write_all(&buf[0..n])
-                .await;
+
+            let write_result = rw.write_all(&buf[0..n]).await;
             match write_result {
                 Err(cause) => {
                     error!("{conn_id} {direction} failed to write data to socket: {cause}");
                     break;
-                },
+                }
                 Ok(_) => {
                     conn_stats1.add_uploaded_bytes(n);
                 }
@@ -109,44 +118,42 @@ async fn handle_socket_inner(socket:TcpStream, raddr: String, conn_stats:Arc<Con
         let conn_id = conn_stats2.id_str();
         let mut buf = vec![0; 4096];
         loop {
-            let nr = rr
-                .read(&mut buf)
-                .await;
-    
+            let nr = rr.read(&mut buf).await;
+
             match nr {
                 Err(cause) => {
                     error!("{conn_id} {direction} failed to read data from socket: {cause}");
                     return;
-                },
-                _ =>{}
+                }
+                _ => {}
             }
             let n = nr.unwrap();
             if n == 0 {
                 return;
             }
-    
-            let write_result = lw
-                .write_all(&buf[0..n])
-                .await;
+
+            let write_result = lw.write_all(&buf[0..n]).await;
             match write_result {
                 Err(cause) => {
                     error!("{conn_id} {direction} failed to write data to socket: {cause}");
                     break;
-                },
+                }
                 Ok(_) => {
                     conn_stats2.add_downloaded_bytes(n);
                 }
             }
         }
-
     });
     jh_lr.await?;
     jh_rl.await?;
     return Ok(());
 }
 
-
-async fn run_pair(bind:String, forward:String, g_stats:Arc<GlobalStats>) -> Result<(), Box<dyn Error>> {
+async fn run_pair(
+    bind: String,
+    forward: String,
+    g_stats: Arc<GlobalStats>,
+) -> Result<(), Box<dyn Error>> {
     let listener = TcpListener::bind(&bind).await?;
     info!("Listening on: {}", &bind);
 
@@ -163,14 +170,16 @@ async fn run_pair(bind:String, forward:String, g_stats:Arc<GlobalStats>) -> Resu
     }
 }
 
-async fn handle_socket(socket:TcpStream, laddr:String, raddr:String, gstat:Arc<GlobalStats>) {
+async fn handle_socket(socket: TcpStream, laddr: String, raddr: String, gstat: Arc<GlobalStats>) {
     let cstat = Arc::new(ConnStats::new(Arc::clone(&gstat)));
     let conn_id = cstat.id_str();
     let remote_addr = socket.peer_addr();
+    
     if remote_addr.is_err() {
         error!("{conn_id} has no remote peer info. closed");
         return;
-    } 
+    }
+
     let remote_addr = remote_addr.unwrap();
     info!("{conn_id} started: from {remote_addr} via {laddr}");
     let cstat_clone = Arc::clone(&cstat);
@@ -183,13 +192,12 @@ async fn handle_socket(socket:TcpStream, laddr:String, raddr:String, gstat:Arc<G
     match result {
         Err(cause) => {
             error!("{conn_id} failed. cause: {cause}");
-        },
-        Ok(_) => {
-
         }
+        Ok(_) => {}
     }
     info!("{conn_id} stopped: up {up_bytes_str} down {down_bytes_str} uptime {elapsed:#?}");
 }
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let args = CliArg::parse();
@@ -208,6 +216,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut futures = Vec::new();
     let global_stats = statistics::GlobalStats::new();
     let g_stats = Arc::new(global_stats);
+
     for next_bind in args.bind {
         let tokens = next_bind.split("::").collect::<Vec<&str>>();
         if tokens.len() != 2 {
@@ -238,8 +247,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
             info!("**  Stats: active: {active} total: {total_conn_count} up: {uploaded} down: {downloaded} **");
         }
     });
+
     for next_future in futures {
         let _ = next_future.await;
     }
+
     return Ok(());
 }

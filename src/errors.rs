@@ -13,10 +13,10 @@ impl std::fmt::Display for PipeError {
 
 impl PipeError {
     pub fn wrap(msg: String) -> PipeError {
-        return PipeError{msg};
+        return PipeError { msg };
     }
 
-    pub fn wrap_box(msg:String) -> Box<PipeError>{
+    pub fn wrap_box(msg: String) -> Box<PipeError> {
         return Box::new(Self::wrap(msg));
     }
 }
