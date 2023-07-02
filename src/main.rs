@@ -4,8 +4,6 @@ use log::{error, info, LevelFilter, Record};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
-use std::mem::MaybeUninit;
-
 use bytesize::ByteSize;
 use chrono::prelude::*;
 use clap::Parser;
