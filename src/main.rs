@@ -82,10 +82,7 @@ async fn handle_socket_inner(
     // L -> R path
     let jh_lr = tokio::spawn(async move {
         let direction = ">>>";
-        let mut buf = Vec::with_capacity(4096);
-        unsafe {
-            buf.set_len(4096);
-        }
+        let mut buf = vec![0; 4096];
 
         let conn_id = conn_stats1.id_str();
         loop {
@@ -120,10 +117,7 @@ async fn handle_socket_inner(
     let jh_rl = tokio::spawn(async move {
         let direction = "<<<";
         let conn_id = conn_stats2.id_str();
-        let mut buf = Vec::with_capacity(4096);
-        unsafe {
-            buf.set_len(4096);
-        }
+        let mut buf = vec![0; 4096];
         loop {
             let nr = rr.read(&mut buf).await;
 
