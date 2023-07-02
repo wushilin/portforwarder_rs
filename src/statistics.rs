@@ -98,10 +98,12 @@ impl Clone for GlobalStats {
         };
     }
 }
+
 fn new_au(start: usize) -> Arc<AtomicUsize> {
     let au = AtomicUsize::new(start);
     return Arc::new(au);
 }
+
 impl GlobalStats {
     pub fn new() -> GlobalStats {
         return GlobalStats {

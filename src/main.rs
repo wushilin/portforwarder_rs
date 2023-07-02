@@ -4,6 +4,8 @@ use log::{error, info, LevelFilter, Record};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
+use std::mem::MaybeUninit;
+
 use bytesize::ByteSize;
 use chrono::prelude::*;
 use clap::Parser;
@@ -82,7 +84,11 @@ async fn handle_socket_inner(
     // L -> R path
     let jh_lr = tokio::spawn(async move {
         let direction = ">>>";
-        let mut buf = vec![0; 4096];
+        let mut buf = Vec::with_capacity(4096);
+        unsafe {
+            buf.set_len(4096);
+        }
+
         let conn_id = conn_stats1.id_str();
         loop {
             let nr = lr.read(&mut buf).await;
@@ -116,7 +122,10 @@ async fn handle_socket_inner(
     let jh_rl = tokio::spawn(async move {
         let direction = "<<<";
         let conn_id = conn_stats2.id_str();
-        let mut buf = vec![0; 4096];
+        let mut buf = Vec::with_capacity(4096);
+        unsafe {
+            buf.set_len(4096);
+        }
         loop {
             let nr = rr.read(&mut buf).await;
 
@@ -174,7 +183,7 @@ async fn handle_socket(socket: TcpStream, laddr: String, raddr: String, gstat: A
     let cstat = Arc::new(ConnStats::new(Arc::clone(&gstat)));
     let conn_id = cstat.id_str();
     let remote_addr = socket.peer_addr();
-    
+
     if remote_addr.is_err() {
         error!("{conn_id} has no remote peer info. closed");
         return;
