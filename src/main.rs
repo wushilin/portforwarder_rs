@@ -268,6 +268,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             stats:Arc::new(global_stats),
         }
     );
+    info!("Execution context is {ctx:#?}");
     for next_bind in args.bind {
         let tokens = next_bind.split("::").collect::<Vec<&str>>();
         if tokens.len() != 2 {
