@@ -83,7 +83,8 @@ async fn handle_socket_inner(
     let conn_id = conn_stats.id_str();
     info!("{conn_id} connecting to {raddr}...");
     let r_stream = TcpStream::connect(raddr).await?;
-    info!("{conn_id} connected.");
+    let local_addr = r_stream.local_addr()?;
+    info!("{conn_id} connected via {local_addr}");
     let (mut lr, mut lw) = tokio::io::split(socket);
     let (mut rr, mut rw) = tokio::io::split(r_stream);
 
