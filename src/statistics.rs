@@ -79,6 +79,7 @@ impl Clone for ConnStats {
     }
 }
 
+#[derive(Debug)]
 pub struct GlobalStats {
     id_gen: Arc<AtomicUsize>,
     conn_count: Arc<AtomicUsize>,
