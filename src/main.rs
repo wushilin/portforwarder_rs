@@ -7,11 +7,11 @@ use tokio::net::{TcpListener, TcpStream};
 
 use bytesize::ByteSize;
 use clap::Parser;
-use statistics::{ConnStats};
+use statistics::ConnStats;
 use std::error::Error;
 use std::sync::Arc;
 use std::time::Duration;
-use futures::lock::{Mutex};
+use futures::lock::Mutex;
 
 #[derive(Parser, Debug, Clone)]
 pub struct CliArg {
