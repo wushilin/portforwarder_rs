@@ -1,17 +1,32 @@
 #!/bin/sh
 
+export IFS=";"
+BINARIES="portforwarder;test1"
 BASE_NAME=portforwarder
-if [ "X$1" = "X" ]; then
-   echo "Version required"
-   exit
-fi
+ARCH=x86_64-unknown-linux-musl
+echo Updating git...
 git pull
 sh build.sh
-VERSION=$1
+VERSION=`cat Cargo.toml | grep version | head -1 | sed 's/^.*=\|"\|\\s//g'`
 echo Building version $VERSION
-DIR=target/x86_64-unknown-linux-musl/release
+DIR=target/$ARCH/release
+TARGET=$(pwd -P)/target/$BASE_NAME-$ARCH-$VERSION.tar
+TARGET_Z=$TARGET.gz
+echo Target: $TARGET_Z
 cd $DIR
-TARGET=/tmp/$BASE_NAME-linux-$VERSION.tar.gz
 rm -f $TARGET
-tar zcvf $TARGET $BASE_NAME
-cd -
+rm -f $TARGET_Z
+for next in $BINARIES
+do
+  if [ ! -f $next ]; then
+    continue
+  fi
+  echo "Adding file $next"
+  if [ -f $TARGET ]; then
+    tar --append --file $TARGET $next
+  else
+    tar cf $TARGET $next
+  fi
+done
+gzip $TARGET
+cd - >> /dev/null

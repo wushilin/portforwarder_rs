@@ -1,20 +1,15 @@
 pub mod errors;
 pub mod statistics;
 pub mod idletracker;
-use log::{error, info, LevelFilter, Record, debug};
+use log::{error, info, debug};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
 use bytesize::ByteSize;
-use chrono::prelude::*;
 use clap::Parser;
-use env_logger::fmt::Formatter;
-use env_logger::Builder;
 use statistics::{ConnStats};
 use std::error::Error;
-use std::io::Write;
 use std::sync::Arc;
-use std::thread;
 use std::time::Duration;
 use futures::lock::{Mutex};
 
@@ -33,10 +28,10 @@ pub struct CliArg {
         help = "stats report interval in ms"
     )]
     pub ri: i32,
-    #[arg(long, default_value_t=String::from("INFO"), help="log level argument (ERROR INFO WARN DEBUG)")]
-    pub log_level: String,
     #[arg(long, default_value_t=300, help="close connection after max idle in seconds")]
     pub max_idle: i32,
+    #[arg(long, default_value_t=String::from("log4rs.yaml"), help="log4rs config yaml file path")]
+    pub log_conf_file:String
 }
 
 #[derive(Debug)]
@@ -45,33 +40,12 @@ struct ExecutionContext {
     pub stats: Arc<statistics::GlobalStats>,
 }
 
-pub fn setup_logger(log_thread: bool, rust_log: Option<&str>) {
-    let output_format = move |formatter: &mut Formatter, record: &Record| {
-        let thread_name = if log_thread {
-            format!("(t: {}) ", thread::current().name().unwrap_or("unknown"))
-        } else {
-            "".to_string()
-        };
-        let local_time: DateTime<Local> = Local::now();
-        let time_str = local_time.to_rfc3339_opts(SecondsFormat::Millis, true);
-        write!(
-            formatter,
-            "{} {}{: >5} - {}\n",
-            time_str,
-            thread_name,
-            record.level(),
-            record.args()
-        )
-    };
+static LOG_TGT:&str = "portforwarder";
 
-    let mut builder = Builder::new();
-    builder
-        .format(output_format)
-        .filter(None, LevelFilter::Info);
-
-    rust_log.map(|conf| builder.parse_filters(conf));
-
-    builder.init();
+pub fn setup_logger(log_conf_file:&str)->Result<(), Box<dyn Error>> {
+    log4rs::init_file(log_conf_file, Default::default())?;
+    println!("logs will be sent according to config file {log_conf_file}");
+    Ok(())
 }
 
 async fn handle_socket_inner(
@@ -81,10 +55,10 @@ async fn handle_socket_inner(
     ctx: Arc<ExecutionContext>
 ) -> Result<(), Box<dyn Error>> {
     let conn_id = conn_stats.id_str();
-    info!("{conn_id} connecting to {raddr}...");
+    info!(target:LOG_TGT, "{conn_id} connecting to {raddr}...");
     let r_stream = TcpStream::connect(raddr).await?;
     let local_addr = r_stream.local_addr()?;
-    info!("{conn_id} connected via {local_addr}");
+    info!(target:LOG_TGT, "{conn_id} connected via {local_addr}");
     let (mut lr, mut lw) = tokio::io::split(socket);
     let (mut rr, mut rw) = tokio::io::split(r_stream);
 
@@ -109,7 +83,7 @@ async fn handle_socket_inner(
             let nr = lr.read(&mut buf).await;
             match nr {
                 Err(cause) => {
-                    error!("{conn_id} {direction} failed to read data from socket: {cause}");
+                    error!(target:LOG_TGT, "{conn_id} {direction} failed to read data from socket: {cause}");
                     return;
                 }
                 _ => {}
@@ -123,7 +97,7 @@ async fn handle_socket_inner(
             let write_result = rw.write_all(&buf[0..n]).await;
             match write_result {
                 Err(cause) => {
-                    error!("{conn_id} {direction} failed to write data to socket: {cause}");
+                    error!(target:LOG_TGT, "{conn_id} {direction} failed to write data to socket: {cause}");
                     break;
                 }
                 Ok(_) => {
@@ -144,7 +118,7 @@ async fn handle_socket_inner(
 
             match nr {
                 Err(cause) => {
-                    error!("{conn_id} {direction} failed to read data from socket: {cause}");
+                    error!(target:LOG_TGT, "{conn_id} {direction} failed to read data from socket: {cause}");
                     return;
                 }
                 _ => {}
@@ -157,7 +131,7 @@ async fn handle_socket_inner(
             let write_result = lw.write_all(&buf[0..n]).await;
             match write_result {
                 Err(cause) => {
-                    error!("{conn_id} {direction} failed to write data to socket: {cause}");
+                    error!(target:LOG_TGT, "{conn_id} {direction} failed to write data to socket: {cause}");
                     break;
                 }
                 Ok(_) => {
@@ -177,7 +151,7 @@ async fn handle_socket_inner(
                 if idle_tracker.lock().await.is_expired() {
                     let idle_max = idle_tracker.lock().await.max_idle();
                     let idled_for = idle_tracker.lock().await.idled_for();
-                    info!("{conn_id} connection idled {idled_for:#?} > {idle_max:#?}. cancelling");
+                    info!(target:LOG_TGT, "{conn_id} connection idled {idled_for:#?} > {idle_max:#?}. cancelling");
                     if !jh_lr.is_finished() {
                         jh_lr.abort();
                     }
@@ -202,7 +176,7 @@ async fn run_pair(
     ctx: Arc<ExecutionContext>,
 ) -> Result<(), Box<dyn Error>> {
     let listener = TcpListener::bind(&bind).await?;
-    info!("Listening on: {}", &bind);
+    info!(target:LOG_TGT, "Listening on: {}", &bind);
 
     loop {
         // Asynchronously wait for an inbound socket.
@@ -223,12 +197,12 @@ async fn handle_socket(socket: TcpStream, laddr: String, raddr: String, ctx:Arc<
     let remote_addr = socket.peer_addr();
 
     if remote_addr.is_err() {
-        error!("{conn_id} has no remote peer info. closed");
+        error!(target:LOG_TGT, "{conn_id} has no remote peer info. closed");
         return;
     }
 
     let remote_addr = remote_addr.unwrap();
-    info!("{conn_id} started: from {remote_addr} via {laddr}");
+    info!(target:LOG_TGT, "{conn_id} started: from {remote_addr} via {laddr}");
     let cstat_clone = Arc::clone(&cstat);
     let result = handle_socket_inner(socket, raddr, cstat_clone, ctx).await;
     let up_bytes = cstat.uploaded_bytes();
@@ -238,27 +212,33 @@ async fn handle_socket(socket: TcpStream, laddr: String, raddr: String, ctx:Arc<
     let elapsed = cstat.elapsed();
     match result {
         Err(cause) => {
-            error!("{conn_id} failed. cause: {cause}");
+            error!(target:LOG_TGT, "{conn_id} failed. cause: {cause}");
         }
         Ok(_) => {}
     }
-    info!("{conn_id} stopped: up {up_bytes_str} down {down_bytes_str} uptime {elapsed:#?}");
+    info!(target:LOG_TGT, "{conn_id} stopped: up {up_bytes_str} down {down_bytes_str} uptime {elapsed:#?}");
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let args = CliArg::parse();
 
-    let log_level = args.log_level;
     let max_idle = args.max_idle;
-    setup_logger(false, Some(&log_level));
+    let log_conf_file = args.log_conf_file;
+    match setup_logger(&log_conf_file) {
+        Err(cause) => {
+            println!("failed to setup logger using config file `{log_conf_file}` : {cause}");
+            return Ok(());
+        },
+        _ => {}
+    }
 
     if args.bind.len() == 0 {
-        error!("no binding config specified. please specify using `-b` or `--bind`");
+        error!(target:LOG_TGT, "no binding config specified. please specify using `-b` or `--bind`");
         return Ok(());
     }
     for i in &args.bind {
-        info!("Binding config: {i}");
+        info!(target:LOG_TGT, "Binding config: {i}");
     }
 
     let mut futures = Vec::new();
@@ -269,11 +249,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
             stats:Arc::new(global_stats),
         }
     );
-    info!("Execution context is {ctx:#?}");
+    info!(target:LOG_TGT, "Execution context is {ctx:#?}");
     for next_bind in args.bind {
         let tokens = next_bind.split("::").collect::<Vec<&str>>();
         if tokens.len() != 2 {
-            error!("invalid specification {next_bind}");
+            error!(target:LOG_TGT, "invalid specification {next_bind}");
             continue;
         }
         let bind_addr = String::from(tokens[0]);
@@ -283,7 +263,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         let jh = tokio::spawn(async move {
             let result = run_pair(bind_addr, forward_addr, ctx).await;
             if let Err(cause) = result {
-                error!("error running tlsproxy for {bind_c} caused by {cause}");
+                error!(target:LOG_TGT, "error running tlsproxy for {bind_c} caused by {cause}");
             }
         });
         futures.push(jh);
@@ -296,7 +276,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             let downloaded = ByteSize(ctx.stats.total_downloaded_bytes() as u64);
             let uploaded = ByteSize(ctx.stats.total_uploaded_bytes() as u64);
             let total_conn_count = ctx.stats.conn_count();
-            info!("**  Stats: active: {active} total: {total_conn_count} up: {uploaded} down: {downloaded} **");
+            info!(target:LOG_TGT, "**  Stats: active: {active} total: {total_conn_count} up: {uploaded} down: {downloaded} **");
         }
     });
 
