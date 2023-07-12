@@ -17,6 +17,16 @@ impl PipeError {
     }
 
     pub fn wrap_box(msg: String) -> Box<PipeError> {
+        let err = PipeError {
+            msg: String::from("")
+        };
+        Self::test(err);
         return Box::new(Self::wrap(msg));
+    }
+
+    pub fn test<T>(idn: T)
+        where T:Copy + std::error::Error
+    {
+
     }
 }

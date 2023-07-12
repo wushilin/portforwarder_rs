@@ -16,7 +16,7 @@ appenders:
         limit: 10 mb
       roller:
         kind: fixed_window
-        pattern: log/tlsproxy.{}.log.gz
+        pattern: "/var/log/tlsproxy.{}.log.gz"
         count: 20
         base: 1
 root:
