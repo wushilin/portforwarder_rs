@@ -2,13 +2,15 @@ use std::collections::{HashMap, HashSet};
 use std::time::{Instant, Duration};
 use std::sync::{Arc, RwLock};
 use std::error::Error;
+use crate::resolve::ResolveConfig;
 
 /// Host checker checks a bunch of hosts and report whether the target is reachable. 
 /// The timeout is always 3 seconds as it seems to be reasonable!
 #[derive(Debug)]
 pub struct HostChecker {
     /// Connect timeout
-    timeout: Duration
+    timeout: Duration,
+    resolver: ResolveConfig,
 }
 
 /// Host checker check all hosts given at the same time, using the timeout specified.
@@ -22,8 +24,9 @@ impl HostChecker {
         for i in &hosts {
             let local_hp = i.clone();
             let timeout = self.timeout;
+            let resolver = self.resolver.clone();
             let jh = tokio::spawn(async move {
-                let result = Self::check_one(&local_hp, timeout).await;
+                let result = Self::check_one(resolver,&local_hp, timeout).await;
                 if result.is_err() {
                     return (local_hp, false)
                 } else {
@@ -41,10 +44,11 @@ impl HostChecker {
     }
 
 
-    async fn check_one(host_str:&String, timeout:Duration) -> Result<(), Box<dyn Error>>{
+    async fn check_one(resolver:ResolveConfig, host_str:&String, timeout:Duration) -> Result<(), Box<dyn Error>>{
+        let resolved = resolver.resolve(host_str);
         let _ = tokio::time::timeout(
             timeout,
-            tokio::net::TcpStream::connect(&host_str)
+            tokio::net::TcpStream::connect(&resolved)
         ).await??;
         return Ok(());
     }
@@ -151,14 +155,14 @@ pub struct HostGroupTracker {
 }
 
 impl HostGroupTracker {
-    pub fn new(timeout: u64) -> HostGroupTracker {
+    pub fn new(timeout: u64, resolver:ResolveConfig) -> HostGroupTracker {
         let mut actual_timeout = timeout;
         if actual_timeout < 100 {
             actual_timeout = 100;
         }
         return HostGroupTracker { 
             host_groups: Arc::new(RwLock::new(HashMap::new())),
-            host_checker: Arc::new(HostChecker {timeout: Duration::from_millis(actual_timeout)}),
+            host_checker: Arc::new(HostChecker {timeout: Duration::from_millis(actual_timeout), resolver}),
         }
     }
 

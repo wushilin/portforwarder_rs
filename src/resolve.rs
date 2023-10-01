@@ -2,7 +2,8 @@ use std::{collections::HashMap, io::Read};
 use serde_json::Value;
 use std::error::Error;
 
-use super::errors::PipeError;
+
+use crate::errors::PipeError;
 
 /// Represents a resolve config. It internally stores Keys as HostAndPort and values as HostAndPort as well.
 #[derive(Debug, Clone)]
@@ -31,13 +32,18 @@ impl ResolveConfig {
     
     /// Resolve a lookup String -> String
     /// It could be empty though
-    pub fn resolve(&self, original:&str) -> Option<&String> {
+    pub fn resolve(&self, original:&str) -> String {
         if self.rules.len() == 0 {
-            return None;
+            return original.to_string();
         }
 
         let original_lower = original.to_ascii_lowercase();
-        return self.rules.get(&original_lower);
+        let result = self.rules.get(&original_lower);
+        if result.is_none() {
+            return original.to_string();
+        } else {
+            return result.unwrap().to_string();
+        }
     }
     
     fn value_to_string(value:Value) -> Result<String, Box<dyn Error>> {

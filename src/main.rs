@@ -46,14 +46,9 @@ async fn handle_socket_inner(
     ctx: Arc<ExecutionContext>
 ) -> Result<(), Box<dyn Error>> {
     let conn_id = conn_stats.id_str();
-    let mut raddr_copy = raddr.clone();
-    let resolved_raddr = ctx.resolver.resolve(&raddr_copy);
-    if resolved_raddr.is_some() {
-        info!(target:LOG_TGT, "{conn_id} resolver resolved {raddr} -> {raddr_copy}");
-        raddr_copy = resolved_raddr.unwrap().clone();
-    } else {
-        info!(target:LOG_TGT, "{conn_id} resolver did not resolve");
-    }
+    let raddr_copy = raddr.clone();
+    let raddr_copy = ctx.resolver.resolve(&raddr_copy);
+    info!(target:LOG_TGT, "{conn_id} resolver resolved `{raddr}` -> `{raddr_copy}`");
     info!(target:LOG_TGT, "{conn_id} connecting to {raddr_copy}...");
     let r_stream = TcpStream::connect(raddr_copy).await?;
     let local_addr = r_stream.local_addr()?;

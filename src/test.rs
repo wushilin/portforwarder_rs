@@ -1,9 +1,11 @@
 pub mod backend;
-
+pub mod resolve;
+pub mod errors;
+use resolve::ResolveConfig;
 use backend::{HostGroupTracker, HostGroup};
 #[tokio::main]
 async fn main() {
-    let mut hgt = HostGroupTracker::new(10000);
+    let mut hgt = HostGroupTracker::new(10000, ResolveConfig::default());
     let mut target = HostGroup::new("some");
     target.add("192.168.44.105:80");
     target.add("192.168.44.160:80");

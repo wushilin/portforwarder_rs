@@ -1,7 +1,7 @@
 use serde::{Serialize, Deserialize};
 use std::error::Error;
 use std::fs;
-use crate::backend::{HostGroupTracker, HostGroup};
+use crate::{backend::{HostGroupTracker, HostGroup}, resolve::ResolveConfig};
 use std::collections::HashSet;
 
 #[derive(Debug, PartialEq, Serialize, Deserialize, Clone)]
@@ -50,8 +50,19 @@ impl Config {
         }
         return None;
     }
+
+    pub fn create_resolver(&self) -> ResolveConfig {
+        if self.options.dns_override_file == "" {
+            return ResolveConfig::default();
+        }
+        let config = ResolveConfig::load_from_json_file(&self.options.dns_override_file);
+        if config.is_err() {
+            return ResolveConfig::default();
+        }
+        return config.unwrap();
+    }
     pub fn create_backend(&self) -> HostGroupTracker {
-        let mut result = HostGroupTracker::new(self.options.healthcheck_timeout_ms as u64);
+        let mut result = HostGroupTracker::new(self.options.healthcheck_timeout_ms as u64, self.create_resolver());
         for backend in &self.backends {
             let name = &backend.name;
             let targets = &backend.hosts;

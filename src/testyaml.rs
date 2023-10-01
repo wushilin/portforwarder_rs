@@ -1,5 +1,7 @@
 pub mod backend;
 pub mod config;
+pub mod resolve;
+pub mod errors;
 
 use tokio::{fs::File, io::AsyncReadExt};
 use config::Config;
