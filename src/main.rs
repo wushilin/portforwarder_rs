@@ -73,8 +73,10 @@ async fn handle_socket_inner(
     let idle_tracker1 = Arc::clone(&idle_tracker);
     let idle_tracker2 = Arc::clone(&idle_tracker);
     // L -> R path
+    let conn_id_local = conn_id.clone();
     let jh_lr = tokio::spawn(async move {
         let direction = ">>>";
+        info!(target:LOG_TGT, "{conn_id_local} {direction} started...");
         let mut buf = vec![0; 4096];
 
         let conn_id = conn_stats1.id_str();
@@ -108,8 +110,10 @@ async fn handle_socket_inner(
     });
 
     // R -> L path
+    let conn_id_local = conn_id.clone();
     let jh_rl = tokio::spawn(async move {
         let direction = "<<<";
+        info!(target:LOG_TGT, "{conn_id_local} {direction} started...");
         let conn_id = conn_stats2.id_str();
         let mut buf = vec![0; 4096];
         loop {
@@ -219,7 +223,7 @@ async fn run_pair(
             continue;
         }
         let raddr = raddr.unwrap();
-        info!(target:LOG_TGT, "{conn_id} load balancer selected `{name}` -> `{backend_name}` -> `{raddr}`");
+        info!(target:LOG_TGT, "{conn_id} load balancer selected `{name} -> {backend_name}` -> `{raddr}`");
         tokio::spawn(async move {
             //handle_incoming(socket);
             handle_socket(socket, laddr, raddr, local_gstats, cstat, conn_id).await;
