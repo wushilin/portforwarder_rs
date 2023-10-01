@@ -194,9 +194,16 @@ async fn run_pair(
             return Ok(());
         }
         // Asynchronously wait for an inbound socket.
-        let (socket, _) = listener.accept().await?;
         let cstat = Arc::new(ConnStats::new(Arc::clone(&ctx.stats)));
         let conn_id = cstat.id_str();
+        let (socket, _) = listener.accept().await?;
+        let addr = socket.peer_addr();
+        if addr.is_err() {
+            info!(target:LOG_TGT, "{conn_id} no peer address info. Skipped.");
+            continue;
+        }
+        let addr = addr.unwrap();
+        info!(target:LOG_TGT, "{conn_id} accepted from {addr}");
         let local_gstats = Arc::clone(&ctx);
         let laddr = bind.clone();
         let backend_name = ctx.config.lookup_backend(name);
