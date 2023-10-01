@@ -74,6 +74,7 @@ async fn handle_socket_inner(
     let idle_tracker2 = Arc::clone(&idle_tracker);
     // L -> R path
     let conn_id_local = conn_id.clone();
+    info!(target:LOG_TGT, "{conn_id_local} starting...");
     let jh_lr = tokio::spawn(async move {
         let direction = ">>>";
         info!(target:LOG_TGT, "{conn_id_local} {direction} started...");

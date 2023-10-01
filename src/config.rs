@@ -65,7 +65,7 @@ impl Config {
             }
             result.add(host_group);
         }
-        result.start_checker();
+        //result.start_checker();
         return result;
     }
 }
