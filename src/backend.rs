@@ -3,7 +3,10 @@ use std::time::{Instant, Duration};
 use std::sync::{Arc, RwLock};
 use std::error::Error;
 use crate::resolve::ResolveConfig;
+use log::{error, info, debug};
 
+
+static LOG_TGT:&str = "portforwarder";
 /// Host checker checks a bunch of hosts and report whether the target is reachable. 
 /// The timeout is always 3 seconds as it seems to be reasonable!
 #[derive(Debug)]
@@ -28,8 +31,10 @@ impl HostChecker {
             let jh = tokio::spawn(async move {
                 let result = Self::check_one(resolver,&local_hp, timeout).await;
                 if result.is_err() {
+                    info!(target:LOG_TGT, "{local_hp} not ok");
                     return (local_hp, false)
                 } else {
+                    info!(target:LOG_TGT, "{local_hp} ok");
                     return (local_hp, true)
                 }
             });
@@ -46,6 +51,7 @@ impl HostChecker {
 
     async fn check_one(resolver:ResolveConfig, host_str:&String, timeout:Duration) -> Result<(), Box<dyn Error>>{
         let resolved = resolver.resolve(host_str);
+        info!(target:LOG_TGT, "checking health for {host_str} -> {resolved}");
         let _ = tokio::time::timeout(
             timeout,
             tokio::net::TcpStream::connect(&resolved)
