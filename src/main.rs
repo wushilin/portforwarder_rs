@@ -202,10 +202,7 @@ async fn run_pair(
         let (socket, _) = listener.accept().await?;
         let cstat = Arc::new(ConnStats::new(Arc::clone(&ctx.stats)));
         let conn_id = cstat.id_str();
-        let start = std::time::Instant::now();
         let addr = socket.peer_addr();
-        let end = std::time::Instant::now();
-        let timetaken = end.duration_since(start);
         if addr.is_err() {
             info!(target:LOG_TGT, "{conn_id} no peer address info. Skipped.");
             continue;
