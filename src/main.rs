@@ -199,10 +199,9 @@ async fn run_pair(
             return Ok(());
         }
         // Asynchronously wait for an inbound socket.
+        let (socket, _) = listener.accept().await?;
         let cstat = Arc::new(ConnStats::new(Arc::clone(&ctx.stats)));
         let conn_id = cstat.id_str();
-        info!("{conn_id} begin");
-        let (socket, _) = listener.accept().await?;
         let start = std::time::Instant::now();
         let addr = socket.peer_addr();
         let end = std::time::Instant::now();
