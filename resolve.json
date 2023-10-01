@@ -1,5 +1,5 @@
 {
-    "www.google.com;www.g1.com;www.g2.com;www.g3.com:3": "127.0.0.1",
-    "www.baidu.com": "127.0.0.1",
-    "www.google.com:443": "192.168.44.17"
+    "www.google.com:443": "127.0.0.1:22",
+    "www.baidu.com:443": "127.0.0.1:22",
+    "www.google.com:80": "192.168.44.100:80"
 }

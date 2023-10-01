@@ -206,7 +206,6 @@ async fn run_pair(
         let addr = socket.peer_addr();
         let end = std::time::Instant::now();
         let timetaken = end.duration_since(start);
-        info!(target:LOG_TGT, "{conn_id} address took {timetaken:?}");
         if addr.is_err() {
             info!(target:LOG_TGT, "{conn_id} no peer address info. Skipped.");
             continue;
@@ -217,13 +216,13 @@ async fn run_pair(
         let laddr = bind.clone();
         let backend_name = ctx.config.lookup_backend(name);
         if backend_name.is_none() {
-            info!(target:LOG_TGT, "{conn_id} no backend defined for listener `{name}`, not started");
+            info!(target:LOG_TGT, "{conn_id} no backend defined for listener `{name}`. Skipped.");
             continue;
         }
         let backend_name = backend_name.unwrap();
         let raddr= ctx.backend.select(&backend_name);
         if raddr.is_none() {
-            info!(target:LOG_TGT, "{conn_id} no backend available for `{name}` -> `{backend_name}`. Not started");
+            info!(target:LOG_TGT, "{conn_id} no backend available for `{name}` -> `{backend_name}`. Skipped.");
             continue;
         }
         let raddr = raddr.unwrap();
