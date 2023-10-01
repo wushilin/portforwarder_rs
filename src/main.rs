@@ -312,6 +312,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     for next_bind in bindings {
         let ctx = Arc::clone(&ctx);
         let jh = tokio::spawn(async move {
+            info!(target:LOG_TGT, "Starting listener `{next_bind:?}`");
             let result = run_pair(next_bind.clone(), ctx).await;
             if let Err(cause) = result {
                 error!(target:LOG_TGT, "error running portforwarder for {next_bind:?} caused by {cause}");
@@ -342,9 +343,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
     //    tokio::time::sleep(Duration::from_secs(1)).await;
     //}
     //println!("All stopped");
-    for next_future in listener_handles {
-        let _ = next_future.await;
+    //for next_future in listener_handles {
+    //    let _ = next_future.await;
+    //}
+    loop {
+        tokio::time::sleep(Duration::from_millis(1000)).await;
     }
     // println!("Exiting");
-    return Ok(());
+    //return Ok(());
 }
