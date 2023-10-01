@@ -194,7 +194,7 @@ impl HostGroupTracker {
                     wi.update(&global_check_result);
                 }
 
-                std::thread::sleep(std::time::Duration::from_millis(3000))
+                tokio::time::sleep(Duration::from_millis(3000)).await
             }
         });
     }
