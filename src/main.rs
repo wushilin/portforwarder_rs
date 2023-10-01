@@ -196,6 +196,7 @@ async fn run_pair(
         // Asynchronously wait for an inbound socket.
         let cstat = Arc::new(ConnStats::new(Arc::clone(&ctx.stats)));
         let conn_id = cstat.id_str();
+        info!("{conn_id} begin");
         let (socket, _) = listener.accept().await?;
         let addr = socket.peer_addr();
         if addr.is_err() {
