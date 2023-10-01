@@ -1,6 +1,9 @@
 pub mod errors;
 pub mod statistics;
 pub mod idletracker;
+pub mod resolve;
+pub mod backend;
+pub mod config;
 use log::{error, info, debug};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -9,35 +12,23 @@ use bytesize::ByteSize;
 use clap::Parser;
 use statistics::ConnStats;
 use std::error::Error;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 use futures::lock::Mutex;
 
 #[derive(Parser, Debug, Clone)]
 pub struct CliArg {
-    #[arg(
-        short,
-        long,
-        help = "forward config `bind_ip:bind_port::forward_host:forward_port` format (repeat for multiple)"
-    )]
-    pub bind: Vec<String>,
-    #[arg(
-        short,
-        long,
-        default_value_t = 30000,
-        help = "stats report interval in ms"
-    )]
-    pub ri: i32,
-    #[arg(long, default_value_t=300, help="close connection after max idle in seconds")]
-    pub max_idle: i32,
-    #[arg(long, default_value_t=String::from("log4rs.yaml"), help="log4rs config yaml file path")]
-    pub log_conf_file:String
+    #[arg(short, long, default_value_t=String::from("config.yaml"), help="Location of your `config.yaml`")]
+    pub config_yaml: String
 }
 
 #[derive(Debug)]
 struct ExecutionContext {
-    pub max_idle: i32,
     pub stats: Arc<statistics::GlobalStats>,
+    pub resolver:resolve::ResolveConfig,
+    pub stop: Arc<RwLock<bool>>,
+    pub config: Arc<config::Config>,
+    pub backend: Arc<backend::HostGroupTracker>,
 }
 
 static LOG_TGT:&str = "portforwarder";
@@ -55,8 +46,16 @@ async fn handle_socket_inner(
     ctx: Arc<ExecutionContext>
 ) -> Result<(), Box<dyn Error>> {
     let conn_id = conn_stats.id_str();
-    info!(target:LOG_TGT, "{conn_id} connecting to {raddr}...");
-    let r_stream = TcpStream::connect(raddr).await?;
+    let mut raddr_copy = raddr.clone();
+    let resolved_raddr = ctx.resolver.resolve(&raddr_copy);
+    if resolved_raddr.is_some() {
+        info!(target:LOG_TGT, "{conn_id} resolver resolved {raddr} -> {raddr_copy}");
+        raddr_copy = resolved_raddr.unwrap().clone();
+    } else {
+        info!(target:LOG_TGT, "{conn_id} resolver did not resolve");
+    }
+    info!(target:LOG_TGT, "{conn_id} connecting to {raddr_copy}...");
+    let r_stream = TcpStream::connect(raddr_copy).await?;
     let local_addr = r_stream.local_addr()?;
     info!(target:LOG_TGT, "{conn_id} connected via {local_addr}");
     let (mut lr, mut lw) = tokio::io::split(socket);
@@ -67,7 +66,7 @@ async fn handle_socket_inner(
     let conn_stats2 = Arc::clone(&conn_stats);
     let idle_tracker = Arc::new(
         Mutex::new (
-            idletracker::IdleTracker::new(Duration::from_secs(ctx.max_idle as u64))
+            idletracker::IdleTracker::new(ctx.config.options.max_idle_ms)
         )
     );
 
@@ -148,6 +147,16 @@ async fn handle_socket_inner(
                     debug!("{conn_id} both direction terminated gracefully");
                     break;
                 }
+                if *ctx.stop.read().unwrap() {
+                    info!("{conn_id} stoped by context.");
+                    if !jh_lr.is_finished() {
+                        jh_lr.abort();
+                    }
+                    if !jh_rl.is_finished() {
+                        jh_rl.abort();
+                    }
+                    break;
+                }
                 if idle_tracker.lock().await.is_expired() {
                     let idle_max = idle_tracker.lock().await.max_idle();
                     let idled_for = idle_tracker.lock().await.idled_for();
@@ -171,29 +180,46 @@ async fn handle_socket_inner(
 }
 
 async fn run_pair(
-    bind: String,
-    forward: String,
+    listener: config::Listener,
     ctx: Arc<ExecutionContext>,
 ) -> Result<(), Box<dyn Error>> {
-    let listener = TcpListener::bind(&bind).await?;
+    let bind = &listener.bind;
+    let name = &listener.name;
+    let listener = TcpListener::bind(bind).await?;
     info!(target:LOG_TGT, "Listening on: {}", &bind);
 
     loop {
+        if *ctx.stop.read().unwrap() {
+            info!(target:LOG_TGT, "Listener `{bind}` stopped");
+            return Ok(());
+        }
         // Asynchronously wait for an inbound socket.
         let (socket, _) = listener.accept().await?;
+        let cstat = Arc::new(ConnStats::new(Arc::clone(&ctx.stats)));
+        let conn_id = cstat.id_str();
         let local_gstats = Arc::clone(&ctx);
         let laddr = bind.clone();
-        let raddr = forward.clone();
+        let backend_name = ctx.config.lookup_backend(name);
+        if backend_name.is_none() {
+            info!(target:LOG_TGT, "{conn_id} no backend defined for listener `{name}`, not started");
+            continue;
+        }
+        let backend_name = backend_name.unwrap();
+        let raddr= ctx.backend.select(&backend_name);
+        if raddr.is_none() {
+            info!(target:LOG_TGT, "{conn_id} no backend available for `{name}` -> `{backend_name}`. Not started");
+            continue;
+        }
+        let raddr = raddr.unwrap();
+        info!(target:LOG_TGT, "{conn_id} load balancer selected `{name}` -> `{backend_name}` -> `{raddr}`");
         tokio::spawn(async move {
             //handle_incoming(socket);
-            let _ = handle_socket(socket, laddr, raddr, local_gstats).await;
+            handle_socket(socket, laddr, raddr, local_gstats, cstat, conn_id).await;
         });
     }
 }
 
-async fn handle_socket(socket: TcpStream, laddr: String, raddr: String, ctx:Arc<ExecutionContext>) {
-    let cstat = Arc::new(ConnStats::new(Arc::clone(&ctx.stats)));
-    let conn_id = cstat.id_str();
+async fn handle_socket(socket: TcpStream, laddr: String, raddr: String, ctx:Arc<ExecutionContext>, cstat:Arc<ConnStats>, conn_id: String) {
     let remote_addr = socket.peer_addr();
 
     if remote_addr.is_err() {
@@ -222,10 +248,15 @@ async fn handle_socket(socket: TcpStream, laddr: String, raddr: String, ctx:Arc<
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let args = CliArg::parse();
+    let config_yaml_file = args.config_yaml;
+    let config_object = config::Config::load(&config_yaml_file);
+    if config_object.is_err() {
+        panic!("Unable to load file `{config_yaml_file}`");
+    }
 
-    let max_idle = args.max_idle;
-    let log_conf_file = args.log_conf_file;
-    match setup_logger(&log_conf_file) {
+    let config_object = config_object.unwrap();
+    let log_conf_file = &config_object.options.log_config_file;
+    match setup_logger(log_conf_file) {
         Err(cause) => {
             println!("failed to setup logger using config file `{log_conf_file}` : {cause}");
             return Ok(());
@@ -233,45 +264,49 @@ async fn main() -> Result<(), Box<dyn Error>> {
         _ => {}
     }
 
-    if args.bind.len() == 0 {
-        error!(target:LOG_TGT, "no binding config specified. please specify using `-b` or `--bind`");
+    let bindings = (&config_object.listeners).clone();
+    if bindings.len() == 0 {
+        error!(target:LOG_TGT, "no binding config specified. please specify in your config file");
         return Ok(());
     }
-    for i in &args.bind {
-        info!(target:LOG_TGT, "Binding config: {i}");
+    for i in &bindings {
+        let name = &i.name;
+        let bind = &i.bind;
+        info!(target:LOG_TGT, "Binding config: `{name}` -> `{bind}`");
     }
 
-    let mut futures = Vec::new();
+    let mut resolver:resolve::ResolveConfig = Default::default();
+    if config_object.options.dns_override_file != "" {
+        resolver = resolve::ResolveConfig::load_from_json_file(&config_object.options.dns_override_file).expect("Unable to read the resolve config file!");
+    }
+
+    let mut listener_handles = Vec::new();
     let global_stats = statistics::GlobalStats::new();
+    let lb_backend = config_object.create_backend();
     let ctx = Arc::new(
         ExecutionContext {
-            max_idle,
             stats:Arc::new(global_stats),
+            resolver,
+            stop: Arc::new(RwLock::new(false)),
+            config: Arc::new(config_object),
+            backend: Arc::new(lb_backend),
         }
     );
     info!(target:LOG_TGT, "Execution context is {ctx:#?}");
-    for next_bind in args.bind {
-        let tokens = next_bind.split("::").collect::<Vec<&str>>();
-        if tokens.len() != 2 {
-            error!(target:LOG_TGT, "invalid specification {next_bind}");
-            continue;
-        }
-        let bind_addr = String::from(tokens[0]);
-        let forward_addr = String::from(tokens[1]);
-        let bind_c = next_bind.clone();
+    for next_bind in bindings {
         let ctx = Arc::clone(&ctx);
         let jh = tokio::spawn(async move {
-            let result = run_pair(bind_addr, forward_addr, ctx).await;
+            let result = run_pair(next_bind.clone(), ctx).await;
             if let Err(cause) = result {
-                error!(target:LOG_TGT, "error running tlsproxy for {bind_c} caused by {cause}");
+                error!(target:LOG_TGT, "error running portforwarder for {next_bind:?} caused by {cause}");
             }
         });
-        futures.push(jh);
+        listener_handles.push(jh);
     }
 
     tokio::spawn(async move {
         loop {
-            tokio::time::sleep(Duration::from_millis(args.ri as u64)).await;
+            tokio::time::sleep(Duration::from_millis(ctx.config.options.reporting_interval_ms as u64)).await;
             let active = ctx.stats.active_conn_count();
             let downloaded = ByteSize(ctx.stats.total_downloaded_bytes() as u64);
             let uploaded = ByteSize(ctx.stats.total_uploaded_bytes() as u64);
@@ -280,9 +315,20 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
     });
 
-    for next_future in futures {
+    //tokio::time::sleep(Duration::from_secs(30)).await;
+    //println!("Requesting stop...");
+    //*(ctx_local.stop.write().unwrap()) = true;
+
+    //println!("Waiting for completion...");
+    //while ctx_local.stats.active_conn_count() > 0 {
+    //    let new_count = ctx_local.stats.active_conn_count();
+    //    println!("{new_count} active");
+    //    tokio::time::sleep(Duration::from_secs(1)).await;
+    //}
+    //println!("All stopped");
+    for next_future in listener_handles {
         let _ = next_future.await;
     }
-
+    // println!("Exiting");
     return Ok(());
 }

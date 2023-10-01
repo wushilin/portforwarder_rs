@@ -1,0 +1,30 @@
+options:
+  healthcheck_timeout_ms: 5000
+  reporting_interval_ms: 5000
+  dns_override_file: resolve.json
+  log_config_file: log4rs.yaml
+  max_idle_ms: 600000
+
+listeners:
+- name: HTTPS
+  bind: 0.0.0.0:80
+- name: SSH
+  bind: 0.0.0.0:2022
+
+backends:
+- name: bazinga80
+  hosts: 
+  - 192.168.44.100:80
+  - 192.168.44.6:80
+  - www.google.com:80
+- name: sshbe
+  hosts:
+  - www.google.com:22
+  - 192.168.44.106:22
+  - 192.168.44.105:22
+
+forwarding:
+  - from: HTTPS
+    to: bazinga80
+  - from: SSH
+    to: sshbe

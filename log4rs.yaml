@@ -29,4 +29,5 @@ loggers:
     level: info
     appenders:
       - default
+      - stdout
     additive: false
