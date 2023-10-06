@@ -1,12 +1,17 @@
 # Port forwarder with a UI
 
 # Configuration UI
+Online edit via Admin server
 ![image](https://github.com/wushilin/portforwarder_rs/assets/7019828/71317719-e2ef-4d91-984a-e6dab3b18851)
 
 # Online configuration change
 ![image](https://github.com/wushilin/portforwarder_rs/assets/7019828/ba2efaaa-3bef-4648-95a4-74b61d469473)
 
+You may update server config via web UI and trigger restart.
+
 # Realtime monitoring and statistics
+
+Visualize the listener and portforwarding status
 
 Supports
 
@@ -122,5 +127,15 @@ PrivateTmp=true
 [Install]
 WantedBy=multi-user.target
 ```
+
+## Start
+
+Just run the portforwarder. No argument required. All support files must be in the same folder
+
+Visit your server at http://host:48888 to start managing.
+
+If prompted for Basic auth, please enter the username and password
+
+# Enjoy
 
 
