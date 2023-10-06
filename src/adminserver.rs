@@ -205,7 +205,8 @@ async fn get_listener_status(who:Authenticated) -> Result<String, ISE> {
 }
 
 #[get("/apiserver/stats/listeners")]
-async fn get_listener_stats(#[allow(non_snake_case)] _w:Authenticated) -> Result<String, ISE> {
+#[allow(unused_variables)]
+async fn get_listener_stats(who:Authenticated) -> Result<String, ISE> {
     let result = manager::get_listener_stats().await;
     let result = convert_error(serde_json::to_string(&result));
     return result;

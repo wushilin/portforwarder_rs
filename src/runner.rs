@@ -201,6 +201,10 @@ impl Runner {
     ) -> JoinHandle<()> {
         let mut reader = reader_i;
         let mut writer = writer_i;
+        let direction = match is_upload {
+            true => "upload",
+            false => "download",
+        };
         tokio::spawn(async move {
             let mut buf = vec![0; 4096];
 
@@ -234,6 +238,7 @@ impl Runner {
                     }
                 }
             }
+            info!("{conn_id} {direction} ended");
         })
     }
 }
