@@ -179,8 +179,8 @@ async fn put_dns_config(who:Authenticated, data:String) -> Result<String, ISE> {
 }
 
 #[put("/apiserver/config/listeners", data="<data>")]
-#[allow(non_snake_case)]
-async fn put_listener_config(_w:Authenticated, data:String) -> Result<String, ISE> {
+#[allow(unused_variables)]
+async fn put_listener_config(who:Authenticated, data:String) -> Result<String, ISE> {
     let _ = LOCK.write().await;
     let map:HashMap<String, Listener> = convert_error(serde_json::from_str(&data))?;
     let mut conf:PFConfig = convert_error(PFConfig::load_file(CONFIG_FILE).await)?;

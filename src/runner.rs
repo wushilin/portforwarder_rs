@@ -160,7 +160,6 @@ impl Runner {
                         info!("{conn_id} abort download as upload stopped");
                         jh2.abort();
                     }
-                    info!("{conn_id} pipe ended");
                     break;
                 }
                 {
@@ -191,7 +190,7 @@ impl Runner {
         })
     }
     fn pipe(
-        conn_id:u64, 
+        in_conn_id:u64, 
         reader_i: ReadHalf<TcpStream>,
         writer_i: WriteHalf<TcpStream>,
         context: Arc<RwLock<ListenerContext>>,
@@ -205,6 +204,7 @@ impl Runner {
             true => "upload",
             false => "download",
         };
+        let conn_id = in_conn_id;
         tokio::spawn(async move {
             let mut buf = vec![0; 4096];
 
