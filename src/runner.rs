@@ -1,9 +1,11 @@
 use crate::idletracker::IdleTracker;
 use anyhow::Result;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{Ordering, AtomicU64};
 use std::{collections::HashSet, sync::Arc, time::Duration};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use anyhow::anyhow;
+use log::info;
+use lazy_static::lazy_static;
 use tokio::{
     io::{ReadHalf, WriteHalf},
     net::{TcpListener, TcpStream},
@@ -18,12 +20,18 @@ use crate::{
     resolver,
 };
 
+lazy_static!(
+    static ref COUNTER: Arc<AtomicU64> = Arc::new(AtomicU64::new(0));
+);
 pub struct Runner {
     pub name:String,
     pub listener: Listener,
     pub config: Arc<RwLock<Config>>,
 }
 
+fn id() -> u64 {
+    COUNTER.fetch_add(1, Ordering::SeqCst) + 1
+}
 impl Runner {
     pub fn new(name:String, listener: Listener, config: Arc<RwLock<Config>>) -> Runner {
         Runner { name, listener, config }
@@ -68,6 +76,7 @@ impl Runner {
         }
         loop {
             let (socket, _) = listener.accept().await?;
+            let conn_id = id();
             // TODO
             let target_vec_clone = targets_vec.clone();
             let context = Arc::clone(&context);
@@ -78,42 +87,55 @@ impl Runner {
                     let ctx = context_clone.read().await;
                     let new_active = ctx.increase_conn_count();
                     let new_total = ctx.total_count();
-                    println!("New connection: active {new_active} total {new_total}");
+                    let addr = socket.peer_addr();
+                    if addr.is_err() {
+                        return;
+                    }
+                    let addr = addr.unwrap();
+                    info!("{conn_id} new connection from {addr:?} active {new_active} total {new_total}");
 
                 }
-                let _ = Self::worker(target_vec_clone, socket, context_local).await;
+                let _ = Self::worker(conn_id, target_vec_clone, socket, context_local).await;
                 {
                     let ctx = context_clone.read().await;
                     let new_active = ctx.decrease_conn_count();
                     let new_total = ctx.total_count();
-                    println!("Closing connection: active {new_active} total {new_total}");
+                    info!("{conn_id} closing connection: active {new_active} total {new_total}");
                 }
             });
         }
     }
 
     async fn worker(
+        conn_id: u64,
         targets_vec: Vec<String>,
         socket: TcpStream,
         context: Arc<RwLock<ListenerContext>>,
     ) -> Result<()> {
+        // TODO
         let target = targets_vec.get(0).unwrap().clone();
         let resolved = resolver::resolve(&target).await;
         let r_stream = TcpStream::connect(&resolved).await?;
+        let local_addr = r_stream.local_addr()?;
+        info!("{conn_id} connected to {resolved} via {local_addr:?}");
         let (lr, lw) = tokio::io::split(socket);
         let (rr, rw) = tokio::io::split(r_stream);
         let idle_tracker = Arc::new(Mutex::new(IdleTracker::new(
             context.read().await.idle_timeout_ms,
         )));
         let context_clone = Arc::clone(&context);
-        let jh1 = Self::pipe(lr, rw, context_clone, Arc::clone(&idle_tracker), true);
+        let uploaded = Arc::new(AtomicU64::new(0));
+        let downloaded = Arc::new(AtomicU64::new(0));
+        let jh1 = Self::pipe(conn_id, lr, rw, context_clone, Arc::clone(&idle_tracker), true, Arc::clone(&uploaded));
         let context_clone = Arc::clone(&context);
-        let jh2 = Self::pipe(rr, lw, context_clone, Arc::clone(&idle_tracker), false);
+        let jh2 = Self::pipe(conn_id, rr, lw, context_clone, Arc::clone(&idle_tracker), false, Arc::clone(&downloaded));
         let context_clone = Arc::clone(&context);
 
-        let jh = Self::run_idle_tracker(jh1, jh2, context_clone, Arc::clone(&idle_tracker));
+        let jh = Self::run_idle_tracker(conn_id, jh1, jh2, context_clone, Arc::clone(&idle_tracker));
         let _ = jh.await;
-        println!("JH is done");
+        let uploaded_total = uploaded.load(Ordering::SeqCst);
+        let downloaded_total = downloaded.load(Ordering::SeqCst);
+        info!("{conn_id} end uploaded {uploaded_total} downloaded {downloaded_total}");
         Ok(())
     }
     fn dummy() -> JoinHandle<()> {
@@ -121,6 +143,7 @@ impl Runner {
     }
 
     fn run_idle_tracker(
+        conn_id: u64,
         jh1: JoinHandle<()>,
         jh2: JoinHandle<()>,
         context: Arc<RwLock<ListenerContext>>,
@@ -128,15 +151,22 @@ impl Runner {
     ) -> JoinHandle<()> {
         tokio::spawn(async move {
             loop {
-                if jh1.is_finished() && jh2.is_finished() {
-                    println!("Pipe gracefully down");
+                if jh1.is_finished() || jh2.is_finished() {
+                    if !jh1.is_finished() {
+                        info!("{conn_id} abort upload as download stopped");
+                        jh1.abort();
+                    }
+                    if !jh2.is_finished() {
+                        info!("{conn_id} abort download as upload stopped");
+                        jh2.abort();
+                    }
+                    info!("{conn_id} pipe ended");
                     break;
                 }
                 {
                     let cancel_requested = context.read().await.cancel_requested.load(Ordering::SeqCst);
-                    println!("Cancel requested: {cancel_requested}");
                     if cancel_requested {
-                        println!("Aborting PIPE!!!");
+                        info!("{conn_id} cancel requested. aborting");
                         if !jh1.is_finished() {
                             jh1.abort();
                         }
@@ -144,12 +174,10 @@ impl Runner {
                             jh2.abort();
                         }
                         break;
-                    } else {
-                        println!("Cancel is not requested");
-                    }
+                    } 
                 }
                 if idletracker.lock().await.is_expired() {
-                    println!("Aborting expired PIPE!!!");
+                    info!("{conn_id} idle time out. aborting.");
                     if !jh1.is_finished() {
                         jh1.abort();
                     }
@@ -163,11 +191,13 @@ impl Runner {
         })
     }
     fn pipe(
+        conn_id:u64, 
         reader_i: ReadHalf<TcpStream>,
         writer_i: WriteHalf<TcpStream>,
         context: Arc<RwLock<ListenerContext>>,
         idletracker: Arc<Mutex<IdleTracker>>,
         is_upload: bool,
+        counter:Arc<AtomicU64>
     ) -> JoinHandle<()> {
         let mut reader = reader_i;
         let mut writer = writer_i;
@@ -178,14 +208,14 @@ impl Runner {
                 let nr = reader.read(&mut buf).await;
                 match nr {
                     Err(_) => {
-                        return;
+                        break;
                     }
                     _ => {}
                 }
 
                 let n = nr.unwrap();
                 if n == 0 {
-                    return;
+                    break;
                 }
 
                 let write_result = writer.write_all(&buf[0..n]).await;
@@ -194,10 +224,11 @@ impl Runner {
                         break;
                     }
                     Ok(_) => {
+                        counter.fetch_add(n as u64, Ordering::SeqCst);
                         if is_upload {
-                            context.write().await.increase_uploaded_bytes(n);
+                            context.read().await.increase_uploaded_bytes(n);
                         } else {
-                            context.write().await.increase_downloaded_bytes(n);
+                            context.read().await.increase_downloaded_bytes(n);
                         }
                         idletracker.lock().await.mark();
                     }

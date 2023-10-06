@@ -8,12 +8,12 @@ options:
   log_config_file: log4rs.yaml
   max_idle_time_ms: 1000000
 dns:
-  aaaa: basdf
   what???: 192.168.44.101:443
+  aaaa: basdf
   other: good
 admin_server:
   bind_address: 0.0.0.0
-  bind_port: 48889
+  bind_port: 48888
   username: admin
   password: pass1234
   tls_cert: null
