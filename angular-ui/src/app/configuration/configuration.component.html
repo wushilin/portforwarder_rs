@@ -1,0 +1,181 @@
+<p></p>
+<p></p>
+<p></p>
+<button mat-raised-button color="primary" (click)="saveData()">Save</button>
+&nbsp;
+&nbsp;
+<button mat-raised-button color="secondary" (click)="fetchData()">Reload</button>
+&nbsp;
+&nbsp;
+<button mat-raised-button color="warn" (click)="restart()">Restart</button>
+&nbsp;
+&nbsp;
+<button mat-raised-button color="accent" (click)="restore()">Restore configuration</button>
+<p></p>
+<p></p>
+<p></p>
+<mat-expansion-panel hideToggle>
+  <mat-expansion-panel-header>
+    <mat-panel-title>
+      Listeners
+    </mat-panel-title>
+    <mat-panel-description>
+      The listeners configuration (click to expand)
+    </mat-panel-description>
+  </mat-expansion-panel-header>
+  <div>
+    <p></p>
+    <p></p>
+    <p></p>
+    <table mat-table [dataSource]="listenersList" class="mat-elevation-z8">
+
+      <!--- Note that these columns can be defined in any order.
+            The actual rendered columns are set as a property on the row definition" -->
+
+      <!-- Position Column -->
+      <ng-container matColumnDef="name">
+        <th mat-header-cell *matHeaderCellDef> Name </th>
+        <td mat-cell *matCellDef="let element"> 
+          <button mat-raised-button color="warn" (click)="deleteListener(element[0])">Delete</button>
+          &nbsp;
+          &nbsp;
+          &nbsp;
+          {{element[0]}} 
+        </td>
+      </ng-container>
+
+      <!-- Name Column -->
+      <ng-container matColumnDef="bind">
+        <th mat-header-cell *matHeaderCellDef> Bind Address </th>
+        <td mat-cell *matCellDef="let element"> {{element[1].bind}} </td>
+      </ng-container>
+
+      <!-- Weight Column -->
+      <ng-container matColumnDef="targets">
+        <th mat-header-cell *matHeaderCellDef> Target Addresses </th>
+        <td mat-cell *matCellDef="let element">
+          <mat-form-field class="example-chip-list" style="width:100%; background-color:#ffffff;">
+            <mat-chip-grid #chipGrid aria-label="Enter targets">
+              <div *ngFor="let target of element[1].targets" style="flex-basis: 100%">
+                <mat-chip-row color="primary" highlighted (removed)="removeTarget(element[0], target)" [editable]="true"
+                  (edited)="editTarget(element[0], target, $event)"
+                  [aria-description]="'press enter to edit ' + target">
+                  <div style="font-size: 20px; font-weight: bold;">{{target}}</div>
+                  <button matChipRemove [attr.aria-label]="'remove ' + target">
+                    <mat-icon>cancel</mat-icon>
+                  </button>
+                </mat-chip-row>
+              </div>
+              <input placeholder="New target..." [matChipInputFor]="chipGrid"
+                [matChipInputSeparatorKeyCodes]="separatorKeysCodes" [matChipInputAddOnBlur]="targetAddOnBlur"
+                (matChipInputTokenEnd)="addTargetEvent(element[0], $event)" />
+            </mat-chip-grid>
+          </mat-form-field>
+        </td>
+      </ng-container>
+
+      <tr mat-header-row *matHeaderRowDef="displayedColumns"></tr>
+      <tr mat-row *matRowDef="let row; columns: displayedColumns;"></tr>
+    </table>
+
+    <p></p>
+    <p></p>
+    <p></p>
+    <p></p>
+    <div>
+      <mat-label>Add a new Listener</mat-label>
+
+      <form class="example-form">
+        <mat-form-field class="example-full-width">
+          <mat-label>Listener Name</mat-label>
+          <input matInput placeholder="SSH" [(ngModel)]="newListenerName">
+        </mat-form-field>
+        &nbsp;
+        &nbsp;
+        &nbsp;
+        &nbsp;
+        <mat-form-field class="example-full-width">
+          <mat-label>Bind address</mat-label>
+          <input matInput placeholder="127.0.0.1:1443" [(ngModel)]="newListenerBind">
+        </mat-form-field>
+        &nbsp;
+        &nbsp;
+        &nbsp;
+        &nbsp;
+        <button mat-raised-button color="primary" (click)="addListener()">Add</button>
+      </form>
+    </div>
+  </div>
+</mat-expansion-panel>
+
+<p></p>
+<p></p>
+<p></p>
+
+<mat-expansion-panel hideToggle>
+  <mat-expansion-panel-header>
+    <mat-panel-title>
+      DNS overrides
+    </mat-panel-title>
+    <mat-panel-description>
+      DNS overrides (click to expand)
+    </mat-panel-description>
+  </mat-expansion-panel-header>
+  <div>
+    <p></p>
+    <p></p>
+    <p></p>
+    <table mat-table [dataSource]="dns" class="mat-elevation-z8">
+
+      <!--- Note that these columns can be defined in any order.
+            The actual rendered columns are set as a property on the row definition" -->
+
+      <!-- Position Column -->
+      <ng-container matColumnDef="from">
+        <th mat-header-cell *matHeaderCellDef> From (host:port format)</th>
+        <td mat-cell *matCellDef="let element"> {{element[0]}} </td>
+      </ng-container>
+
+      <!-- Name Column -->
+      <ng-container matColumnDef="to">
+        <th mat-header-cell *matHeaderCellDef> To (host:port format) </th>
+        <td mat-cell *matCellDef="let element"> {{element[1]}} </td>
+      </ng-container>
+      <ng-container matColumnDef="action">
+        <th mat-header-cell *matHeaderCellDef> Action </th>
+        <td mat-cell *matCellDef="let element">
+          <button mat-raised-button color="warn" (click)="replaceDns(element[0], '')">Delete</button>
+        </td>
+      </ng-container>
+      <tr mat-header-row *matHeaderRowDef="dnsDisplayedColumns"></tr>
+      <tr mat-row *matRowDef="let row; columns: dnsDisplayedColumns;"></tr>
+    </table>
+    <p></p>
+    <p></p>
+    <p></p>
+    <p></p>
+    <div>
+      <mat-label>Add or replace DNS Binding</mat-label>
+
+      <form class="example-form">
+        <mat-form-field class="example-full-width">
+          <mat-label>From</mat-label>
+          <input matInput placeholder="www.google.com:443" [(ngModel)]="newFrom">
+        </mat-form-field>
+        &nbsp;
+        &nbsp;
+        &nbsp;
+        &nbsp;
+        <mat-form-field class="example-full-width">
+          <mat-label>Resolve to</mat-label>
+          <input matInput placeholder="127.0.0.1:1443" [(ngModel)]="newTo">
+        </mat-form-field>
+        &nbsp;
+        &nbsp;
+        &nbsp;
+        &nbsp;
+        <button mat-raised-button color="primary" (click)="addDNS()">Add or Replace</button>
+      </form>
+    </div>
+  </div>
+</mat-expansion-panel>

@@ -1,0 +1,76 @@
+<mat-label color="primary">As of {{updateTimestamp}}</mat-label>
+<p></p>
+<p></p>
+<p></p>
+<p></p>
+<p><b>Active Listeners</b></p>
+<p></p>
+<p></p>
+<p></p>
+<p></p>
+<div style="padding: 10px">
+  <table mat-table [dataSource]="stats" class="mat-elevation-z8">
+
+    <!--- Note that these columns can be defined in any order.
+        The actual rendered columns are set as a property on the row definition" -->
+
+    <!-- Position Column -->
+    <ng-container matColumnDef="name">
+      <th mat-header-cell *matHeaderCellDef> Listener Name </th>
+      <td mat-cell *matCellDef="let element"> {{element.name}} ({{getBind(element.name)}}) </td>
+    </ng-container>
+
+    <!-- Name Column -->
+    <ng-container matColumnDef="total">
+      <th mat-header-cell *matHeaderCellDef> Total connections </th>
+      <td mat-cell *matCellDef="let element"> {{element.total}} </td>
+    </ng-container>
+
+    <!-- Weight Column -->
+    <ng-container matColumnDef="active">
+      <th mat-header-cell *matHeaderCellDef> Active connections </th>
+      <td mat-cell *matCellDef="let element"> {{element.active}} </td>
+    </ng-container>
+
+    <!-- Symbol Column -->
+    <ng-container matColumnDef="downloaded">
+      <th mat-header-cell *matHeaderCellDef> Total downloaded bytes from server</th>
+      <td mat-cell *matCellDef="let element"> {{element.downloaded_bytes}} </td>
+    </ng-container>
+    <ng-container matColumnDef="uploaded">
+      <th mat-header-cell *matHeaderCellDef> Total uploaded bytes from client </th>
+      <td mat-cell *matCellDef="let element"> {{element.uploaded_bytes}} </td>
+    </ng-container>
+    <tr mat-header-row *matHeaderRowDef="displayedColumns"></tr>
+    <tr mat-row *matRowDef="let row; columns: displayedColumns;"></tr>
+  </table>
+</div>
+<p></p>
+<p></p>
+<p></p>
+<p></p>
+<div *ngIf="failedListeners.length > 0">
+  <p><b>Failed Listeners</b></p>
+  <div style="padding: 10px">
+    <table mat-table [dataSource]="failedListeners" class="mat-elevation-z8">
+  
+      <!--- Note that these columns can be defined in any order.
+          The actual rendered columns are set as a property on the row definition" -->
+  
+      <!-- Position Column -->
+      <ng-container matColumnDef="name">
+        <th mat-header-cell *matHeaderCellDef> Name </th>
+        <td mat-cell *matCellDef="let element"> {{element[0]}} ({{getBind(element[0])}}) </td>
+      </ng-container>
+  
+      <!-- Name Column -->
+      <ng-container matColumnDef="reason">
+        <th mat-header-cell *matHeaderCellDef> Why it did not work </th>
+        <td mat-cell *matCellDef="let element"> <div style="color:red">{{element[1]}}</div> </td>
+      </ng-container>
+  
+      <tr mat-header-row *matHeaderRowDef="failedDisplayedColumns"></tr>
+      <tr mat-row *matRowDef="let row; columns: failedDisplayedColumns;"></tr>
+    </table>
+  </div>
+</div>

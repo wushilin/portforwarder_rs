@@ -1,0 +1,57 @@
+table{
+    width: 100%;
+   }
+   
+   .mat-column-name {
+     word-wrap: break-word !important;
+     white-space: unset !important;
+     flex: 0 0 10% !important;
+     width: 10% !important;
+     overflow-wrap: break-word;
+     word-wrap: break-word;
+   
+     word-break: break-word;
+   
+     -ms-hyphens: auto;
+     -moz-hyphens: auto;
+     -webkit-hyphens: auto;
+     hyphens: auto;
+   }
+   
+   .mat-column-bind {
+     word-wrap: break-word !important;
+     white-space: unset !important;
+     flex: 0 0 15% !important;
+     width: 15% !important;
+     overflow-wrap: break-word;
+     word-wrap: break-word;
+   
+     word-break: break-word;
+   
+     -ms-hyphens: auto;
+     -moz-hyphens: auto;
+     -webkit-hyphens: auto;
+     hyphens: auto;
+   }
+   mat-chip-row {
+    padding: 4px 9px !important;
+    font-size: 14px;
+    border: 2px solid black;
+    flex-basis: 100%
+   }
+   .mat-column-targets {
+     word-wrap: break-word !important;
+     white-space: unset !important;
+     flex: 0 0 75% !important;
+     width: 75% !important;
+     overflow-wrap: break-word;
+     word-wrap: break-word;
+   
+     word-break: break-word;
+   
+     -ms-hyphens: auto;
+     -moz-hyphens: auto;
+     -webkit-hyphens: auto;
+     hyphens: auto;
+   }
+   

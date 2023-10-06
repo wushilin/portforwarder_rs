@@ -1,0 +1,24 @@
+listeners:
+  google:
+    bind: 0.0.0.0:1443
+    targets:
+    - www.google.com:443
+options:
+  health_check_timeout_ms: 4000
+  log_config_file: log4rs.yaml
+  max_idle_time_ms: 1000000
+dns:
+  aaaa: basdf
+  what???: 192.168.44.101:443
+  other: good
+admin_server:
+  bind_address: 0.0.0.0
+  bind_port: 48889
+  username: admin
+  password: pass1234
+  tls_cert: null
+  tls_key: null
+  tls_ca_cert: null
+  mutual_tls: null
+  tls: false
+  rocket_log_level: normal

@@ -1,0 +1,7 @@
+{
+  "/apiserver": {
+    "target": "http://192.168.44.113:48888",
+    "secure": false,
+    "changeOrigin": true
+  }
+}
