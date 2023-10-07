@@ -7,7 +7,7 @@ use tokio::sync::RwLock;
 use std::time::Duration;
 use std::error::Error;
 use crate::{config::Config, resolver};
-use log::info;
+use log::{info, warn};
 lazy_static! {
     static ref STATUS: Arc<RwLock<HashMap<String, (bool, DateTime<Local>)>>> = Arc::new(RwLock::new(HashMap::new()));
     static ref HOSTS: Arc<RwLock<HashSet<String>>> = Arc::new(RwLock::new(HashSet::new()));
@@ -28,21 +28,31 @@ pub async fn init(config:&Config) {
     info!("initialization completed");
 }
 async fn init_inner(hosts:HashSet<String>) {
+    {
+        info!("clearing all host status");
+        let mut statusw = STATUS.write().await;
+        statusw.clear();
+        info!("host status cleared");
+    }
     let mut w = HOSTS.write().await;
+    info!("clearing host registry");
     w.clear();
     for next in &hosts {
+        info!("registering host {next}");
         w.insert(next.clone());
     }
+
 }
 
 pub async fn start_checker() {
-    let mut w = CHECKER_STARTED.write().await;
-    if *w {
-        // already started
-        return;
+    {
+        let mut w = CHECKER_STARTED.write().await;
+        if *w {
+            // already started
+            return;
+        }
+        *w = true;
     }
-    *w = true;
-    drop(w);
     tokio::spawn(async move {
         loop {
             // Do something
@@ -73,21 +83,23 @@ pub async fn start_checker() {
 
             // Update the check_result into STATUS
             let now = Local::now();
-            let mut w = STATUS.write().await;
-            for (host, result) in check_result {
-                if w.get(&host).is_none() {
-                    // no data
-                    info!("update host `{host}` to be `{result}` at {:?}", now.to_rfc3339());
-                    w.insert(host, (result, now));
-                } else {
-                    let (current_status, current_ts) = w.get(&host).unwrap();
-                    if *current_status != result {
-                        info!("update host `{host}` to be `{result}` at {:?} (was at {:?})", now.to_rfc3339(), current_ts.to_rfc3339());
+            {
+                let mut w = STATUS.write().await;
+                for (host, result) in check_result {
+                    if w.get(&host).is_none() {
+                        // no data
+                        info!("update host `{host}` to be `{result}` at {:?}", now.to_rfc3339());
                         w.insert(host, (result, now));
+                    } else {
+                        let (current_status, current_ts) = w.get(&host).unwrap();
+                        if *current_status != result {
+                            info!("update host `{host}` to be `{result}` at {:?} (was at {:?})", now.to_rfc3339(), current_ts.to_rfc3339());
+                            w.insert(host, (result, now));
+                        }
                     }
                 }
+                // w is dropped here
             }
-            drop(w);
             tokio::time::sleep(Duration::from_millis(5000)).await;
         }
     });
@@ -119,4 +131,32 @@ pub async fn get_status_for(host:&str) -> Option<(bool, DateTime<Local>)> {
 
     let (result, when) = result.unwrap();
     return Some((*result, when.clone()));
+}
+
+pub async fn select<'a>(name:&str, what:&'a Vec<String>) -> (bool, &'a str){
+    let r = STATUS.read().await;
+    let mut candidate:Vec<&String> = Vec::new();
+    for host in what {
+        let status = r.get(host);
+        match status {
+            Some(inner) => {
+                if inner.0 {
+                    candidate.push(&host);
+                }
+            },
+            None =>{}
+        }
+    }
+    if candidate.len() == 0 {
+        // nothing available
+        warn!("listener {name} has no available backend. randomly selecting...");
+        let rand = rand::random::<usize>() % what.len();
+        let selection = what.get(rand).unwrap();
+        return (false, selection);
+    } else {
+        let rand = rand::random::<usize>() % candidate.len();
+        let selection = *candidate.get(rand).unwrap();
+        return (true, selection);
+    }
+    
 }

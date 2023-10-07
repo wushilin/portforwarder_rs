@@ -2,15 +2,18 @@ listeners:
   google:
     bind: 0.0.0.0:1443
     targets:
+    - 192.168.44.113:2332
+    - 192.168.33.42:80
     - www.google.com:443
+    - aafawefwef:22
 options:
   health_check_timeout_ms: 4000
   log_config_file: log4rs.yaml
   max_idle_time_ms: 1000000
 dns:
-  what???: 192.168.44.101:443
   aaaa: basdf
   other: good
+  what???: 192.168.44.101:443
 admin_server:
   bind_address: 0.0.0.0
   bind_port: 48888
@@ -21,4 +24,4 @@ admin_server:
   tls_ca_cert: null
   mutual_tls: null
   tls: false
-  rocket_log_level: normal
+  rocket_log_level: critical

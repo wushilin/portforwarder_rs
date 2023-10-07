@@ -1,10 +1,11 @@
+use crate::healthcheck;
 use crate::idletracker::IdleTracker;
 use anyhow::Result;
 use std::sync::atomic::{Ordering, AtomicU64};
-use std::{collections::HashSet, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use anyhow::anyhow;
-use log::info;
+use log::{info, warn};
 use lazy_static::lazy_static;
 use tokio::{
     io::{ReadHalf, WriteHalf},
@@ -39,7 +40,10 @@ impl Runner {
 
     pub async fn start(&self) -> Result<Arc<RwLock<ListenerContext>>> {
         let bind = self.listener.bind.clone();
+        let name = self.name.clone();
         let targets = self.listener.targets.clone();
+        let mut targets_new = Vec::<String>::new();
+        targets_new.extend(targets.clone());
         let idle_timeout_ms = self.config.read().await.options.max_idle_time_ms;
         let context = ListenerContext::new(Self::dummy(),&self.name, idle_timeout_ms);
         let context = Arc::new(RwLock::new(context));
@@ -47,7 +51,7 @@ impl Runner {
         let reason = Arc::new(RwLock::new(String::new()));
         let reason_clone = Arc::clone(&reason);
         let jh = tokio::spawn(async move {
-            let result = Self::run_listener(bind, targets, context_clone).await;
+            let result = Self::run_listener(name, bind, targets_new, context_clone).await;
             if result.is_err() {
                 let err = result.unwrap_err();
                 let mut reason_local = reason_clone.write().await;
@@ -65,20 +69,19 @@ impl Runner {
     }
 
     async fn run_listener(
+        name: String,
         bind: String,
-        targets: HashSet<String>,
+        targets: Vec<String>,
         context: Arc<RwLock<ListenerContext>>,
     ) -> Result<()> {
         let listener = TcpListener::bind(bind).await?;
-        let mut targets_vec = Vec::new();
-        for next in &targets {
-            targets_vec.push(next.clone());
-        }
+        let targets_vec = Arc::new(targets);
+        let name = Arc::new(name);
         loop {
             let (socket, _) = listener.accept().await?;
             let conn_id = id();
-            // TODO
-            let target_vec_clone = targets_vec.clone();
+            let name = Arc::clone(&name);
+            let target_vec_clone = Arc::clone(&targets_vec);
             let context = Arc::clone(&context);
             tokio::spawn(async move {
                 let context_local = context;
@@ -95,7 +98,11 @@ impl Runner {
                     info!("{conn_id} new connection from {addr:?} active {new_active} total {new_total}");
 
                 }
-                let _ = Self::worker(conn_id, target_vec_clone, socket, context_local).await;
+                let rr = Self::worker(name, conn_id, target_vec_clone, socket, context_local).await;
+                if rr.is_err() {
+                    let err = rr.err().unwrap();
+                    warn!("{conn_id} connection error: {err}");
+                }
                 {
                     let ctx = context_clone.read().await;
                     let new_active = ctx.decrease_conn_count();
@@ -107,15 +114,26 @@ impl Runner {
     }
 
     async fn worker(
+        name: Arc<String>,
         conn_id: u64,
-        targets_vec: Vec<String>,
+        targets_all: Arc::<Vec<String>>,
         socket: TcpStream,
         context: Arc<RwLock<ListenerContext>>,
     ) -> Result<()> {
         // TODO
-        let target = targets_vec.get(0).unwrap().clone();
+        // Selecting from targets_vec, consulting health check
+        
+        //let target = targets_vec.get(0).unwrap().clone();
+        let (ok, target) = healthcheck::select(&name, &targets_all).await;
+        if !ok {
+            info!("{conn_id} selected {target} to connect (failed one)");
+        } else {
+            info!("{conn_id} selected {target} to connect");
+        }
         let resolved = resolver::resolve(&target).await;
-        let r_stream = TcpStream::connect(&resolved).await?;
+        info!("{conn_id} resolved {target} to {resolved}");
+        let connect_future = TcpStream::connect(&resolved);
+        let r_stream = tokio::time::timeout(Duration::from_secs(5), connect_future).await??;
         let local_addr = r_stream.local_addr()?;
         info!("{conn_id} connected to {resolved} via {local_addr:?}");
         let (lr, lw) = tokio::io::split(socket);

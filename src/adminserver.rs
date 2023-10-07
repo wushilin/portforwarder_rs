@@ -145,7 +145,8 @@ async fn index(who:Authenticated) -> Option<NamedFile> {
 }
 
 #[get("/apiserver/config/listeners")]
-async fn get_listener_config(_w:Authenticated) -> Result<String, ISE> {
+#[allow(unused_variables)]
+async fn get_listener_config(who:Authenticated) -> Result<String, ISE> {
     let _ = LOCK.read().await;
     let conf:PFConfig = PFConfig::load_file(CONFIG_FILE).await.map_err(|e| ISE::from(e))?;
     let result = serde_json::to_string(&conf.listeners).map_err(|e| ISE::from(e))?;
@@ -237,10 +238,12 @@ async fn start(who:Authenticated) -> Result<String, ISE> {
 #[allow(unused_variables)]
 async fn restart_and_apply_config(w:Authenticated) -> Result<String, ISE> {
     let _ = LOCK.write().await;
-    let mut last_w = LAST_CONFIG.write().await;
 
     let conf:PFConfig = convert_error(PFConfig::load_file(CONFIG_FILE).await)?;
-    *last_w = conf.clone();
+    {
+        let mut last_w = LAST_CONFIG.write().await;
+        *last_w = conf.clone();
+    }
     manager::stop().await;
     let result = convert_error(manager::start(conf).await)?;
     let mut result_converted = HashMap::new();
@@ -256,7 +259,7 @@ async fn restart_and_apply_config(w:Authenticated) -> Result<String, ISE> {
 #[allow(unused_variables)]
 async fn reset_original_config(who:Authenticated) -> Result<String, ISE> {
     let _ = LOCK.write().await;
-    let old = LAST_CONFIG.write().await;
+    let old = LAST_CONFIG.read().await;
     let old_dns = old.dns.clone();
     let old_listeners = old.listeners.clone();
 
@@ -278,9 +281,10 @@ lazy_static!(
 );
 pub async fn init(config:&PFConfig) {
     info!("initializing adminserver...");
-    let mut w = LAST_CONFIG.write().await;
-    *w = config.clone();
-    drop(w);
+    {
+        let mut w = LAST_CONFIG.write().await;
+        *w = config.clone();
+    }
     let admin_config = (&config.admin_server).clone();
     match admin_config {
         Some(what) => {

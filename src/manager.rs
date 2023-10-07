@@ -125,9 +125,9 @@ pub async fn start(config:Config) -> Result<HashMap<String, Result<bool>>> {
         }
     }
     *status = Status::STARTED;
+    drop(status);
     drop(listeners);
     drop(listener_status);
-    drop(status);
     //return get_listener_status();
     return Ok(get_listener_status().await);
 }
