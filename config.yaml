@@ -1,18 +1,33 @@
 listeners:
+  abc3:
+    bind: 0.0.0.0:4003
+    targets: []
   google:
     bind: 0.0.0.0:1443
     targets:
+    - aafawefwef:22
     - 192.168.44.113:2332
     - 192.168.33.42:80
     - www.google.com:443
-    - aafawefwef:22
+  abc2:
+    bind: 0.0.0.0:4004
+    targets: []
+  abc:
+    bind: 0.0.0.0:40001
+    targets: []
+  aaaa:
+    bind: ewafawef
+    targets: []
+  abc1:
+    bind: 0.0.0.0:4002
+    targets: []
 options:
   health_check_timeout_ms: 4000
   log_config_file: log4rs.yaml
   max_idle_time_ms: 1000000
 dns:
-  aaaa: basdf
   other: good
+  aaaa: basdf
   what???: 192.168.44.101:443
 admin_server:
   bind_address: 0.0.0.0

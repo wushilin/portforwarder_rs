@@ -244,8 +244,12 @@ async fn restart_and_apply_config(w:Authenticated) -> Result<String, ISE> {
         let mut last_w = LAST_CONFIG.write().await;
         *last_w = conf.clone();
     }
+    info!("stopping manager...");
     manager::stop().await;
+    info!("manager stopped");
+    info!("starting manager...");
     let result = convert_error(manager::start(conf).await)?;
+    info!("manager started");
     let mut result_converted = HashMap::new();
     for (key, value) in result {
         let new_error = value.map_err(|x| ISE::from(x));

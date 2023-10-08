@@ -1,12 +1,14 @@
+use crate::controller::Controller;
 use crate::healthcheck;
 use crate::idletracker::IdleTracker;
+use anyhow::anyhow;
 use anyhow::Result;
-use std::sync::atomic::{Ordering, AtomicU64};
+use lazy_static::lazy_static;
+use log::{info, warn};
+use tokio::sync::mpsc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::{sync::Arc, time::Duration};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use anyhow::anyhow;
-use log::{info, warn};
-use lazy_static::lazy_static;
 use tokio::{
     io::{ReadHalf, WriteHalf},
     net::{TcpListener, TcpStream},
@@ -17,62 +19,99 @@ use tokio::{
 
 use crate::{
     config::{Config, Listener},
-    listener_context::ListenerContext,
+    listener_stats::ListenerStats,
     resolver,
 };
 
-lazy_static!(
+lazy_static! {
     static ref COUNTER: Arc<AtomicU64> = Arc::new(AtomicU64::new(0));
-);
+}
 pub struct Runner {
-    pub name:String,
+    pub name: String,
     pub listener: Listener,
     pub config: Arc<RwLock<Config>>,
+    pub controller: Arc<RwLock<Controller>>,
 }
 
 fn id() -> u64 {
     COUNTER.fetch_add(1, Ordering::SeqCst) + 1
 }
 impl Runner {
-    pub fn new(name:String, listener: Listener, config: Arc<RwLock<Config>>) -> Runner {
-        Runner { name, listener, config }
+    pub fn new(
+        name: String,
+        listener: Listener,
+        config: Arc<RwLock<Config>>,
+        root_context: Arc<RwLock<Controller>>,
+    ) -> Runner {
+        Runner {
+            name,
+            listener,
+            config,
+            controller: root_context,
+        }
     }
 
-    pub async fn start(&self) -> Result<Arc<RwLock<ListenerContext>>> {
+    pub async fn start(self) -> Result<Arc<ListenerStats>> {
         let bind = self.listener.bind.clone();
         let name = self.name.clone();
+        let name_clone = name.clone();
         let targets = self.listener.targets.clone();
         let mut targets_new = Vec::<String>::new();
         targets_new.extend(targets.clone());
         let idle_timeout_ms = self.config.read().await.options.max_idle_time_ms;
-        let context = ListenerContext::new(Self::dummy(),&self.name, idle_timeout_ms);
-        let context = Arc::new(RwLock::new(context));
-        let context_clone = Arc::clone(&context);
-        let reason = Arc::new(RwLock::new(String::new()));
-        let reason_clone = Arc::clone(&reason);
-        let jh = tokio::spawn(async move {
-            let result = Self::run_listener(name, bind, targets_new, context_clone).await;
-            if result.is_err() {
-                let err = result.unwrap_err();
-                let mut reason_local = reason_clone.write().await;
-                reason_local.push_str(format!("{err}").as_str()); //= format!("{err}");
+        let stats = ListenerStats::new(&self.name, idle_timeout_ms);
+        let stats = Arc::new(stats);
+        let root_context_clone = Arc::clone(&self.controller);
+        let controller_clone = Arc::clone(&self.controller);
+        let stats_clone = Arc::clone(&stats);
+        let (tx, mut rx) = mpsc::channel(1);
+        
+        let _ = root_context_clone.write().await
+            .spawn(async move {
+                let result =
+                    Self::run_listener(name_clone, bind, targets_new, stats_clone, controller_clone)
+                        .await;
+                if result.is_err() {
+                    let err = result.unwrap_err();
+                    let _ = tx.send(Some(format!("{err}"))).await; //= format!("{err}");
+                }
+            })
+            .await;
+        let fail_reason = tokio::select! {
+            _ = sleep(Duration::from_secs(1)) => {
+                None
+            },
+            what = rx.recv() => {
+                what
             }
-        });
-
-        sleep(Duration::from_millis(1000)).await;
-        let reason_str = reason.read().await;
-        if jh.is_finished() {
-            return Err(anyhow!("{reason_str}"));
+        };
+        let name = name.clone();
+        match fail_reason {
+            None => {
+                info!("listener {name} started without error");
+                return Ok(stats);
+            },
+            Some(fail_reason) => {
+                match fail_reason {
+                    None => {
+                        warn!("listener started with fail reason of NONE...");
+                        return Ok(stats)
+                    },
+                    Some(cause) => {
+                        info!("listener {name} start with error {cause}");
+                        return Err(anyhow!("{}", cause));
+                    }
+                }
+            }
         }
-        context.write().await.handle = jh;
-        return Ok(context);
     }
 
     async fn run_listener(
         name: String,
         bind: String,
         targets: Vec<String>,
-        context: Arc<RwLock<ListenerContext>>,
+        stats: Arc<ListenerStats>,
+        controller: Arc<RwLock<Controller>>,
     ) -> Result<()> {
         let listener = TcpListener::bind(bind).await?;
         let targets_vec = Arc::new(targets);
@@ -82,14 +121,15 @@ impl Runner {
             let conn_id = id();
             let name = Arc::clone(&name);
             let target_vec_clone = Arc::clone(&targets_vec);
-            let context = Arc::clone(&context);
-            tokio::spawn(async move {
-                let context_local = context;
-                let context_clone = Arc::clone(&context_local);
+            let stats = Arc::clone(&stats);
+            let controller_clone = Arc::clone(&controller);
+            let mut controller_inner = controller_clone.write().await;
+            let controller_clone_inner = Arc::clone(&controller);
+            controller_inner.spawn(async move {
+                let stats_local = Arc::clone(&stats);
                 {
-                    let ctx = context_clone.read().await;
-                    let new_active = ctx.increase_conn_count();
-                    let new_total = ctx.total_count();
+                    let new_active = stats_local.increase_conn_count();
+                    let new_total = stats_local.total_count();
                     let addr = socket.peer_addr();
                     if addr.is_err() {
                         return;
@@ -98,31 +138,32 @@ impl Runner {
                     info!("{conn_id} new connection from {addr:?} active {new_active} total {new_total}");
 
                 }
-                let rr = Self::worker(name, conn_id, target_vec_clone, socket, context_local).await;
+                let stats_local_clone = Arc::clone(&stats_local);
+                let rr = Self::worker(name, conn_id, target_vec_clone, socket, stats_local_clone, controller_clone_inner).await;
                 if rr.is_err() {
                     let err = rr.err().unwrap();
                     warn!("{conn_id} connection error: {err}");
                 }
                 {
-                    let ctx = context_clone.read().await;
-                    let new_active = ctx.decrease_conn_count();
-                    let new_total = ctx.total_count();
+                    let new_active = stats_local.decrease_conn_count();
+                    let new_total = stats_local.total_count();
                     info!("{conn_id} closing connection: active {new_active} total {new_total}");
                 }
-            });
+            }).await;
         }
     }
 
     async fn worker(
         name: Arc<String>,
         conn_id: u64,
-        targets_all: Arc::<Vec<String>>,
+        targets_all: Arc<Vec<String>>,
         socket: TcpStream,
-        context: Arc<RwLock<ListenerContext>>,
+        context: Arc<ListenerStats>,
+        controller: Arc<RwLock<Controller>>,
     ) -> Result<()> {
         // TODO
         // Selecting from targets_vec, consulting health check
-        
+
         //let target = targets_vec.get(0).unwrap().clone();
         let (ok, target) = healthcheck::select(&name, &targets_all).await;
         if !ok {
@@ -138,52 +179,76 @@ impl Runner {
         info!("{conn_id} connected to {resolved} via {local_addr:?}");
         let (lr, lw) = tokio::io::split(socket);
         let (rr, rw) = tokio::io::split(r_stream);
-        let idle_tracker = Arc::new(Mutex::new(IdleTracker::new(
-            context.read().await.idle_timeout_ms,
-        )));
+        let idle_tracker = Arc::new(Mutex::new(IdleTracker::new(context.idle_timeout_ms)));
         let context_clone = Arc::clone(&context);
         let uploaded = Arc::new(AtomicU64::new(0));
         let downloaded = Arc::new(AtomicU64::new(0));
-        let jh1 = Self::pipe(conn_id, lr, rw, context_clone, Arc::clone(&idle_tracker), true, Arc::clone(&uploaded));
+        let controller_clone = Arc::clone(&controller);
+        let jh1 = Self::pipe(
+            conn_id,
+            lr,
+            rw,
+            context_clone,
+            Arc::clone(&idle_tracker),
+            true,
+            Arc::clone(&uploaded),
+            controller_clone,
+        )
+        .await;
         let context_clone = Arc::clone(&context);
-        let jh2 = Self::pipe(conn_id, rr, lw, context_clone, Arc::clone(&idle_tracker), false, Arc::clone(&downloaded));
-        let context_clone = Arc::clone(&context);
+        let controller_clone = Arc::clone(&controller);
+        let jh2 = Self::pipe(
+            conn_id,
+            rr,
+            lw,
+            context_clone,
+            Arc::clone(&idle_tracker),
+            false,
+            Arc::clone(&downloaded),
+            controller_clone,
+        )
+        .await;
 
-        let jh = Self::run_idle_tracker(conn_id, jh1, jh2, context_clone, Arc::clone(&idle_tracker));
+        let controller_clone = Arc::clone(&controller);
+        let jh = Self::run_idle_tracker(
+            conn_id,
+            jh1,
+            jh2,
+            Arc::clone(&idle_tracker),
+            controller_clone,
+        )
+        .await;
         let _ = jh.await;
         let uploaded_total = uploaded.load(Ordering::SeqCst);
         let downloaded_total = downloaded.load(Ordering::SeqCst);
         info!("{conn_id} end uploaded {uploaded_total} downloaded {downloaded_total}");
         Ok(())
     }
-    fn dummy() -> JoinHandle<()> {
-        tokio::spawn(async move {})
-    }
-
-    fn run_idle_tracker(
+    async fn run_idle_tracker(
         conn_id: u64,
-        jh1: JoinHandle<()>,
-        jh2: JoinHandle<()>,
-        context: Arc<RwLock<ListenerContext>>,
+        jh1: JoinHandle<Option<()>>,
+        jh2: JoinHandle<Option<()>>,
         idletracker: Arc<Mutex<IdleTracker>>,
-    ) -> JoinHandle<()> {
-        tokio::spawn(async move {
-            loop {
-                if jh1.is_finished() || jh2.is_finished() {
-                    if !jh1.is_finished() {
-                        info!("{conn_id} abort upload as download stopped");
-                        jh1.abort();
+        root_context: Arc<RwLock<Controller>>,
+    ) -> JoinHandle<Option<()>> {
+        root_context
+            .write()
+            .await
+            .spawn(async move {
+                loop {
+                    if jh1.is_finished() || jh2.is_finished() {
+                        if !jh1.is_finished() {
+                            info!("{conn_id} abort upload as download stopped");
+                            jh1.abort();
+                        }
+                        if !jh2.is_finished() {
+                            info!("{conn_id} abort download as upload stopped");
+                            jh2.abort();
+                        }
+                        break;
                     }
-                    if !jh2.is_finished() {
-                        info!("{conn_id} abort download as upload stopped");
-                        jh2.abort();
-                    }
-                    break;
-                }
-                {
-                    let cancel_requested = context.read().await.cancel_requested.load(Ordering::SeqCst);
-                    if cancel_requested {
-                        info!("{conn_id} cancel requested. aborting");
+                    if idletracker.lock().await.is_expired() {
+                        info!("{conn_id} idle time out. aborting.");
                         if !jh1.is_finished() {
                             jh1.abort();
                         }
@@ -191,31 +256,22 @@ impl Runner {
                             jh2.abort();
                         }
                         break;
-                    } 
-                }
-                if idletracker.lock().await.is_expired() {
-                    info!("{conn_id} idle time out. aborting.");
-                    if !jh1.is_finished() {
-                        jh1.abort();
                     }
-                    if !jh2.is_finished() {
-                        jh2.abort();
-                    }
-                    break;
+                    sleep(Duration::from_millis(500)).await;
                 }
-                sleep(Duration::from_millis(500)).await;
-            }
-        })
+            })
+            .await
     }
-    fn pipe(
-        in_conn_id:u64, 
+    async fn pipe(
+        in_conn_id: u64,
         reader_i: ReadHalf<TcpStream>,
         writer_i: WriteHalf<TcpStream>,
-        context: Arc<RwLock<ListenerContext>>,
+        context: Arc<ListenerStats>,
         idletracker: Arc<Mutex<IdleTracker>>,
         is_upload: bool,
-        counter:Arc<AtomicU64>
-    ) -> JoinHandle<()> {
+        counter: Arc<AtomicU64>,
+        controller: Arc<RwLock<Controller>>,
+    ) -> JoinHandle<Option<()>> {
         let mut reader = reader_i;
         let mut writer = writer_i;
         let direction = match is_upload {
@@ -223,40 +279,44 @@ impl Runner {
             false => "download",
         };
         let conn_id = in_conn_id;
-        tokio::spawn(async move {
-            let mut buf = vec![0; 4096];
+        controller
+            .write()
+            .await
+            .spawn(async move {
+                let mut buf = vec![0; 4096];
 
-            loop {
-                let nr = reader.read(&mut buf).await;
-                match nr {
-                    Err(_) => {
-                        break;
-                    }
-                    _ => {}
-                }
-
-                let n = nr.unwrap();
-                if n == 0 {
-                    break;
-                }
-
-                let write_result = writer.write_all(&buf[0..n]).await;
-                match write_result {
-                    Err(_) => {
-                        break;
-                    }
-                    Ok(_) => {
-                        counter.fetch_add(n as u64, Ordering::SeqCst);
-                        if is_upload {
-                            context.read().await.increase_uploaded_bytes(n);
-                        } else {
-                            context.read().await.increase_downloaded_bytes(n);
+                loop {
+                    let nr = reader.read(&mut buf).await;
+                    match nr {
+                        Err(_) => {
+                            break;
                         }
-                        idletracker.lock().await.mark();
+                        _ => {}
+                    }
+
+                    let n = nr.unwrap();
+                    if n == 0 {
+                        break;
+                    }
+
+                    let write_result = writer.write_all(&buf[0..n]).await;
+                    match write_result {
+                        Err(_) => {
+                            break;
+                        }
+                        Ok(_) => {
+                            counter.fetch_add(n as u64, Ordering::SeqCst);
+                            if is_upload {
+                                context.increase_uploaded_bytes(n);
+                            } else {
+                                context.increase_downloaded_bytes(n);
+                            }
+                            idletracker.lock().await.mark();
+                        }
                     }
                 }
-            }
-            info!("{conn_id} {direction} ended");
-        })
+                info!("{conn_id} {direction} ended");
+            })
+            .await
     }
 }

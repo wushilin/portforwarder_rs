@@ -23,7 +23,6 @@ root:
   level: info
   appenders:
     - default
-    - stdout
 
 loggers:
   portforwarder:
