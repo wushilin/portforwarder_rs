@@ -4,11 +4,11 @@ use crate::idletracker::IdleTracker;
 use anyhow::anyhow;
 use anyhow::Result;
 use lazy_static::lazy_static;
-use log::{info, warn};
-use tokio::sync::mpsc;
+use log::{info, warn, error};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::{sync::Arc, time::Duration};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::sync::mpsc;
 use tokio::{
     io::{ReadHalf, WriteHalf},
     net::{TcpListener, TcpStream},
@@ -54,7 +54,6 @@ impl Runner {
     pub async fn start(self) -> Result<Arc<ListenerStats>> {
         let bind = self.listener.bind.clone();
         let name = self.name.clone();
-        let name_clone = name.clone();
         let targets = self.listener.targets.clone();
         let mut targets_new = Vec::<String>::new();
         targets_new.extend(targets.clone());
@@ -65,15 +64,45 @@ impl Runner {
         let controller_clone = Arc::clone(&self.controller);
         let stats_clone = Arc::clone(&stats);
         let (tx, mut rx) = mpsc::channel(1);
-        
-        let _ = root_context_clone.write().await
+
+        let name_clone = name.clone();
+        let _ = root_context_clone
+            .write()
+            .await
             .spawn(async move {
-                let result =
-                    Self::run_listener(name_clone, bind, targets_new, stats_clone, controller_clone)
-                        .await;
-                if result.is_err() {
-                    let err = result.unwrap_err();
-                    let _ = tx.send(Some(format!("{err}"))).await; //= format!("{err}");
+                let mut listener = TcpListener::bind(&bind).await;
+                let max_retry = 3;
+                for i in 1..max_retry + 1 {
+                    if listener.is_ok() {
+                        break;
+                    }
+                    warn!("Listener: `{}` unable to bind to `{}` yet. retrying({i} of {max_retry})", &name_clone, &bind);
+                    sleep(Duration::from_millis(100)).await;
+                    listener = TcpListener::bind(&bind).await;
+                }
+                match listener {
+                    Ok(inner_listener) => {
+                        let _ = tx.send(None).await; // tell listener started successfully
+                        let name_clone_result = name_clone.clone();
+                        let result = Self::run_listener(
+                            name_clone,
+                            inner_listener,
+                            targets_new,
+                            stats_clone,
+                            controller_clone,
+                        ).await;
+                        match result {
+                            Err(cause) => {
+                                error!("listener {name_clone_result} failed with {cause}");
+                            },
+                            _ => {
+                                // it was ok
+                            }
+                        }
+                    }
+                    Err(cause) => {
+                        let _ = tx.send(Some(format!("{cause}"))).await; // tell listener stopped successfully
+                    }
                 }
             })
             .await;
@@ -88,43 +117,40 @@ impl Runner {
         let name = name.clone();
         match fail_reason {
             None => {
-                info!("listener {name} started without error");
+                info!("listener {name} start cancelled");
                 return Ok(stats);
-            },
-            Some(fail_reason) => {
-                match fail_reason {
-                    None => {
-                        warn!("listener started with fail reason of NONE...");
-                        return Ok(stats)
-                    },
-                    Some(cause) => {
-                        info!("listener {name} start with error {cause}");
-                        return Err(anyhow!("{}", cause));
-                    }
-                }
             }
+            Some(fail_reason) => match fail_reason {
+                None => {
+                    warn!("listener {name} started without error");
+                    return Ok(stats);
+                }
+                Some(cause) => {
+                    info!("listener {name} start with error {cause}");
+                    return Err(anyhow!("{}", cause));
+                }
+            },
         }
     }
 
     async fn run_listener(
         name: String,
-        bind: String,
+        listener: TcpListener,
         targets: Vec<String>,
         stats: Arc<ListenerStats>,
         controller: Arc<RwLock<Controller>>,
     ) -> Result<()> {
-        let listener = TcpListener::bind(bind).await?;
         let targets_vec = Arc::new(targets);
         let name = Arc::new(name);
         loop {
             let (socket, _) = listener.accept().await?;
             let conn_id = id();
-            let name = Arc::clone(&name);
             let target_vec_clone = Arc::clone(&targets_vec);
             let stats = Arc::clone(&stats);
             let controller_clone = Arc::clone(&controller);
             let mut controller_inner = controller_clone.write().await;
             let controller_clone_inner = Arc::clone(&controller);
+            let name = Arc::clone(&name);
             controller_inner.spawn(async move {
                 let stats_local = Arc::clone(&stats);
                 {

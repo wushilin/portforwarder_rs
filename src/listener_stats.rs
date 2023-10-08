@@ -2,7 +2,7 @@ use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct ListenerStats {
     pub name:String,
     pub idle_timeout_ms: u64,
@@ -32,6 +32,7 @@ impl StatsSerde {
         }
     }
 }
+
 impl ListenerStats{
     fn newau() -> Arc<AtomicUsize> {
         return Arc::new(AtomicUsize::new(0));

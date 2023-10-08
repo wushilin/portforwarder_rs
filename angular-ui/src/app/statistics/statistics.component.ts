@@ -80,11 +80,9 @@ export class StatisticsComponent implements OnInit {
 
   getBind(name:string):string {
     let find = this.listeners.filter((entry) => {
-      console.log(`comparing ${entry[0]} with ${name}`)
       return entry[0] == name
     })
     if(find.length == 0) {
-      console.log(`not found`)
       return ""
     }
     return find[0][1].bind

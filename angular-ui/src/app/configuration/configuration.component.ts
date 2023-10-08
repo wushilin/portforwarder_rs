@@ -1,5 +1,5 @@
 import { Component, OnInit, ɵɵsetComponentScope } from '@angular/core';
-import { PFService, withLoading, trap, Listener, Listeners, DNS, reportError, reportSuccess, ListenerOk } from '../pf.service';
+import { PFService, withLoading, trap, Listener, Listeners, DNS, reportError, reportSuccess, ListenerOk, SimpleResult, ListenerStatuses } from '../pf.service';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { MatDialog } from '@angular/material/dialog';
 import { MatCard } from '@angular/material/card';
@@ -125,6 +125,80 @@ export class ConfigurationComponent implements OnInit {
     })
   }
 
+  start() {
+    const dialogRef = this.dialog.open(ConfirmationDialogComponent, {
+      data: {
+        message: 'If server is not started, it would be started now. No effect if it is already running',
+        buttonText: {
+          ok: 'Start',
+          cancel: 'Don\'t start'
+        }
+      }
+    });
+    dialogRef.afterClosed().subscribe((confirmed: boolean) => {
+      if (confirmed) {
+        console.log("Starting...");
+        withLoading(() =>
+          this.pfService.start()
+        ).subscribe(result1 => {
+          console.log(`Raw start result is ${JSON.stringify(result1)}`);
+          const simpleResult = result1 as SimpleResult;
+          if(simpleResult.success != undefined && simpleResult.changed != undefined) {
+            reportSuccess(this._snackBar, "Server is already running. You need to stop it first.", "Dismiss");
+            return;
+          }
+          const result = result1 as ListenerStatuses;
+          var failedCount = 0
+          var successCount = 0
+          for(const key in result) {
+            const value = result[key]!
+            const valueOk = value as ListenerOk
+            if(valueOk.Ok == undefined) {
+              failedCount++
+            } else {
+              successCount++
+            }
+          }
+          if(failedCount == 0) {
+            reportSuccess(this._snackBar, `Server started, ${successCount} listeners OK`, "Dismiss");
+          } else {
+            reportError(this._snackBar, `Server started. ${successCount} listeners OK, ${failedCount} listeners failed`, "Dismiss")
+          }
+          console.log(`Start result is ${JSON.stringify(result)}`)
+        });
+      }
+    });
+  }
+  stop() {
+    const dialogRef = this.dialog.open(ConfirmationDialogComponent, {
+      data: {
+        message: 'This will stop all listeners. All connections will be force closed immediately.',
+        buttonText: {
+          ok: 'Stop Anyway',
+          cancel: 'Don\'t stop'
+        }
+      }
+    });
+    dialogRef.afterClosed().subscribe((confirmed: boolean) => {
+      if (confirmed) {
+        console.log("Stopping...");
+        withLoading(() =>
+          this.pfService.stop()
+        ).subscribe(result => {
+            if(result.success) {
+              if(result.changed) {
+                reportSuccess(this._snackBar, `Server stopped`, "Dismiss");
+              } else {
+                reportSuccess(this._snackBar, `Server is already stopped`, "Dismiss");
+              }
+            } else {
+              reportError(this._snackBar, `Can't stop server: ${result.message}`, "Dismiss");
+            }
+            console.log(`Stop result is ${result}`)
+        });
+      }
+    });
+  }
   restart() {
     const dialogRef = this.dialog.open(ConfirmationDialogComponent, {
       data: {

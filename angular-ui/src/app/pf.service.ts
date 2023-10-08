@@ -93,6 +93,13 @@ export type StatsResponse = Record<string, Stats>;
 export type Listeners = Record<string, Listener>;
 
 export type DNS = Record<string, string>;
+export type StartResult = SimpleResult | ListenerStatuses;
+
+export interface SimpleResult {
+  success: boolean,
+  changed: boolean,
+  message: string|undefined,
+}
 
 @Injectable({ providedIn: 'root' })
 export class PFService {
@@ -154,18 +161,18 @@ export class PFService {
 
   restart():Observable<ListenerStatuses> {
     return this.http.post<ListenerStatuses>(this.baseUrl + "/config/apply", "")
-      .pipe(tap(result => this.log(`Apply config result ${result}`)),
+      .pipe(tap(result => this.log(`Restart result ${result}`)),
     );
   }
-  stop():Observable<string> {
-    return this.http.post<string>(this.baseUrl + "/config/stop", "")
+  stop():Observable<SimpleResult> {
+    return this.http.post<SimpleResult>(this.baseUrl + "/config/stop", "")
       .pipe(tap(result => this.log(`Stop result ${result}`)),
     );
   }
 
-  start():Observable<string> {
-    return this.http.post<string>(this.baseUrl + "/config/start", "")
-      .pipe(tap(result => this.log(`Stop result ${result}`)),
+  start():Observable<StartResult> {
+    return this.http.post<StartResult>(this.baseUrl + "/config/start", "")
+      .pipe(tap(result => this.log(`Start result ${JSON.stringify(result)}`)),
     );
   }
   private log(message: string) {

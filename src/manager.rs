@@ -13,9 +13,7 @@ use anyhow::{anyhow, Result};
 use lazy_static::lazy_static;
 use log::{info, warn, error};
 use std::sync::Arc;
-use std::time::Duration;
 use tokio::sync::{RwLock, mpsc};
-use tokio::time::sleep;
 #[derive(Debug, PartialEq, Clone)]
 pub enum Status {
     STARTING,
@@ -80,7 +78,6 @@ pub async fn stop() {
     info!("all tasks cancelled by controller");
     *status = Status::STOPPED;
     info!("stopping manager: succeeded");
-    sleep(Duration::from_secs(1)).await;
 }
 
 pub async fn get_run_status() -> Status {
@@ -125,7 +122,8 @@ pub async fn start(config: Config) -> Result<HashMap<String, Result<bool>>> {
 
     resolver::init(&config).await;
     healthcheck::init(&config).await;
-    healthcheck::start_checker().await;
+    let controller_clone = Arc::clone(&CONTROLLER);
+    healthcheck::start_checker(controller_clone).await;
 
     let config_x = Arc::new(RwLock::new(config.clone()));
     let (tx, mut rx) = mpsc::channel(config.listeners.len());

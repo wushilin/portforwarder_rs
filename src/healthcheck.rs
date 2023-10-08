@@ -1,3 +1,4 @@
+use crate::controller::Controller;
 use crate::{config::Config, resolver};
 use chrono::{DateTime, Local};
 use lazy_static::lazy_static;
@@ -7,12 +8,11 @@ use std::error::Error;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::TcpStream;
-use tokio::sync::RwLock;
+use tokio::sync::{RwLock, mpsc};
 lazy_static! {
     static ref STATUS: Arc<RwLock<HashMap<String, (bool, DateTime<Local>)>>> =
         Arc::new(RwLock::new(HashMap::new()));
     static ref HOSTS: Arc<RwLock<HashSet<String>>> = Arc::new(RwLock::new(HashSet::new()));
-    static ref CHECKER_STARTED: Arc<RwLock<bool>> = Arc::new(RwLock::new(false));
 }
 
 pub async fn init(config: &Config) {
@@ -44,16 +44,9 @@ async fn init_inner(hosts: HashSet<String>) {
     }
 }
 
-pub async fn start_checker() {
-    {
-        let mut w = CHECKER_STARTED.write().await;
-        if *w {
-            // already started
-            return;
-        }
-        *w = true;
-    }
-    tokio::spawn(async move {
+pub async fn start_checker(controller:Arc<RwLock<Controller>>) {
+    let controller_clone = Arc::clone(&controller);
+    controller.write().await.spawn(async move {
         loop {
             let mut hosts_list = Vec::new();
             let mut hosts_results = Vec::new();
@@ -63,8 +56,9 @@ pub async fn start_checker() {
                 let hosts = HOSTS.read().await;
 
                 for i in hosts.iter() {
+                    let controller_clone = Arc::clone(&controller_clone);
                     hosts_list.push(i.clone());
-                    hosts_results.push(check(i.clone(), Duration::from_secs(5)));
+                    hosts_results.push(check(controller_clone, i.clone(), Duration::from_secs(5)));
                 }
             }
 
@@ -110,14 +104,36 @@ pub async fn start_checker() {
             }
             tokio::time::sleep(Duration::from_millis(5000)).await;
         }
-    });
+    }).await;
 }
 
-async fn check(host: String, timeout: Duration) -> Result<(String, bool), Box<dyn Error>> {
+async fn check(controller:Arc<RwLock<Controller>>, host: String, timeout: Duration) -> Result<(String, bool), Box<dyn Error>> {
     let resolved = resolver::resolve(&host).await;
-    let connect_future = TcpStream::connect(&resolved);
-    let _ = tokio::time::timeout(timeout, connect_future).await??;
-    return Ok((host.clone(), true));
+    let (tx, mut rx) = mpsc::channel(1);
+    controller.write().await.spawn(async move {
+        let connect_future = TcpStream::connect(&resolved);
+        let result = tokio::time::timeout(timeout, connect_future).await;
+        if result.is_err() {
+            let _ = tx.send(false).await;
+            return;
+        }
+        let result = result.unwrap();
+        if result.is_err() {
+            _ = tx.send(false).await;
+            return;
+        }
+        let _ = result.unwrap();
+        _ = tx.send(true).await;
+    }).await;
+    let result = rx.recv().await;
+    match result {
+        Some(inner) => {
+            Ok((host.clone(), inner))
+        }, 
+        None => {
+            Ok((host.clone(), false))
+        }
+    }
 }
 
 pub async fn get_all_status() -> HashMap<String, (bool, DateTime<Local>)> {
