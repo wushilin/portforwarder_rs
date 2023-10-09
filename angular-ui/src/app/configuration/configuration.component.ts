@@ -7,7 +7,7 @@ import { MatCardContent } from '@angular/material/card';
 import { MatCardHeader } from '@angular/material/card';
 import { MatCardFooter } from '@angular/material/card';
 import { MatChipEditedEvent, MatChipInputEvent } from '@angular/material/chips';
-import { COMMA, ENTER } from '@angular/cdk/keycodes';
+import {COMMA, ENTER} from '@angular/cdk/keycodes';
 import { forkJoin } from 'rxjs';
 import { ConfirmationDialogComponent } from '../confirmdialog/confirmdialog.component';
 @Component({
@@ -16,27 +16,20 @@ import { ConfirmationDialogComponent } from '../confirmdialog/confirmdialog.comp
   styleUrls: ['./configuration.component.scss'],
 })
 export class ConfigurationComponent implements OnInit {
-  newFrom: string = "";
-  newTo: string = "";
+  newFrom:string = "";
+  newTo:string = ""
 
-  newListenerName: string = "";
-  newListenerBind: string = "";
-  newMaxIdleTimeMs: number = 3600000;
-  newTargetPort: number = 443;
-
+  newListenerName:string = ""
+  newListenerBind:string = ""
 
   separatorKeysCodes = [ENTER, COMMA] as const;
   targetAddOnBlur = true;
-  displayedColumns: string[] = ['name', 'bind', 'targetPort', 'policy', 'maxIdleTime', 'rulesHosts', 'rulesPatterns'];
+  displayedColumns: string[] = ['name', 'bind', 'targets'];
   dnsDisplayedColumns: string[] = ['from', 'to', 'action'];
   dns: [string, string][] = [];
   listenersList: [string, Listener][] = []
   ngOnInit(): void {
     console.log("Configuration Component Init is called");
-    this.newListenerName = ""
-    this.newListenerBind = ""
-    this.newTargetPort = 443
-    this.newMaxIdleTimeMs = 3600000
     this.fetchData()
   }
 
@@ -47,7 +40,7 @@ export class ConfigurationComponent implements OnInit {
           () => this.pfService.getDNS()
         ),
       listeners:
-        withLoading(
+        withLoading (
           () => this.pfService.getListeners()
         ),
     }).subscribe(results => {
@@ -58,7 +51,7 @@ export class ConfigurationComponent implements OnInit {
         this.setDNS(results.dns);
       }
 
-      if (!results.listeners) {
+      if(!results.listeners) {
         reportError(this._snackBar, "Error fetching data", "Dismiss");
       } else {
         this.setListener(results.listeners);
@@ -71,7 +64,7 @@ export class ConfigurationComponent implements OnInit {
     this.newFrom = this.newFrom.trim();
     this.newTo = this.newTo.trim();
 
-    if (this.newFrom.trim() != "" && this.newTo.trim() != "") {
+    if(this.newFrom.trim() != "" && this.newTo.trim() != "") {
       this.replaceDns(this.newFrom, this.newTo);
     }
     this.newFrom = ""
@@ -100,8 +93,8 @@ export class ConfigurationComponent implements OnInit {
   performSaveData() {
     console.log(`I am saving data`);
 
-    let dnsData: DNS = {};
-    let listenerData: Listeners = {};
+    let dnsData:DNS = {};
+    let listenerData:Listeners = {};
     this.dns.forEach((elem) => {
       let key = elem[0];
       let value = elem[1];
@@ -147,39 +140,31 @@ export class ConfigurationComponent implements OnInit {
         console.log("Starting...");
         withLoading(() =>
           this.pfService.start()
-        ).subscribe({
-          next: result => {
-            console.log(`Raw start result is ${JSON.stringify(result)}`);
-            const simpleResult = result as SimpleResult;
-            if (simpleResult.success != undefined && simpleResult.changed != undefined) {
-              reportSuccess(this._snackBar, "Server is already running. You need to stop it first.", "Dismiss");
-              return;
-            }
-            const result1 = result as ListenerStatuses;
-            var failedCount = 0
-            var successCount = 0
-            for (const key in result1) {
-              const value = result1[key]!
-              const valueOk = value as ListenerOk
-              if (valueOk.Ok == undefined) {
-                failedCount++
-              } else {
-                successCount++
-              }
-            }
-            if (failedCount == 0) {
-              reportSuccess(this._snackBar, `Server started, ${successCount} listeners OK`, "Dismiss");
-            } else {
-              reportError(this._snackBar, `Server started. ${successCount} listeners OK, ${failedCount} listeners failed`, "Dismiss")
-            }
-            console.log(`Start result is ${JSON.stringify(result)}`)
-          },
-          error: error => {
-            reportError(this._snackBar, `Server can't be started`, "Dismiss");
-          },
-          complete: () => {
-            console.log("OK");
+        ).subscribe(result1 => {
+          console.log(`Raw start result is ${JSON.stringify(result1)}`);
+          const simpleResult = result1 as SimpleResult;
+          if(simpleResult.success != undefined && simpleResult.changed != undefined) {
+            reportSuccess(this._snackBar, "Server is already running. You need to stop it first.", "Dismiss");
+            return;
           }
+          const result = result1 as ListenerStatuses;
+          var failedCount = 0
+          var successCount = 0
+          for(const key in result) {
+            const value = result[key]!
+            const valueOk = value as ListenerOk
+            if(valueOk.Ok == undefined) {
+              failedCount++
+            } else {
+              successCount++
+            }
+          }
+          if(failedCount == 0) {
+            reportSuccess(this._snackBar, `Server started, ${successCount} listeners OK`, "Dismiss");
+          } else {
+            reportError(this._snackBar, `Server started. ${successCount} listeners OK, ${failedCount} listeners failed`, "Dismiss")
+          }
+          console.log(`Start result is ${JSON.stringify(result)}`)
         });
       }
     });
@@ -200,16 +185,16 @@ export class ConfigurationComponent implements OnInit {
         withLoading(() =>
           this.pfService.stop()
         ).subscribe(result => {
-          if (result.success) {
-            if (result.changed) {
-              reportSuccess(this._snackBar, `Server stopped`, "Dismiss");
+            if(result.success) {
+              if(result.changed) {
+                reportSuccess(this._snackBar, `Server stopped`, "Dismiss");
+              } else {
+                reportSuccess(this._snackBar, `Server is already stopped`, "Dismiss");
+              }
             } else {
-              reportSuccess(this._snackBar, `Server is already stopped`, "Dismiss");
+              reportError(this._snackBar, `Can't stop server: ${result.message}`, "Dismiss");
             }
-          } else {
-            reportError(this._snackBar, `Can't stop server: ${result.message}`, "Dismiss");
-          }
-          console.log(`Stop result is ${result}`)
+            console.log(`Stop result is ${result}`)
         });
       }
     });
@@ -230,29 +215,25 @@ export class ConfigurationComponent implements OnInit {
         console.log("Restarting...");
         withLoading(() =>
           this.pfService.restart()
-        ).subscribe({next: result => {
+        ).subscribe(result => {
           var failedCount = 0
           var successCount = 0
-          for (const key in result) {
+          for(const key in result) {
             const value = result[key]!
             const valueOk = value as ListenerOk
-            if (valueOk.Ok == undefined) {
+            if(valueOk.Ok == undefined) {
               failedCount++
             } else {
               successCount++
             }
           }
-          if (failedCount == 0) {
+          if(failedCount == 0) {
             reportSuccess(this._snackBar, `Server restarted, ${successCount} listeners OK`, "Dismiss");
           } else {
             reportError(this._snackBar, `Server restarted. ${successCount} listeners OK, ${failedCount} listeners failed`, "Dismiss")
           }
           console.log(`Restart result is ${JSON.stringify(result)}`)
-        },
-        error: err => {
-          reportError(this._snackBar, `Server can't be restarted.`, "Dismiss")
-        }
-      });
+        });
       }
     });
   }
@@ -280,52 +261,49 @@ export class ConfigurationComponent implements OnInit {
     });
 
   }
-  deleteListener(name: string) {
+  deleteListener(name:string) {
     var newListners = this.listenersList.filter((it) => it[0] != name);
     this.listenersList = newListners;
   }
 
   addListener() {
-    this.newListenerName = this.newListenerName.trim()
-    this.newListenerBind = this.newListenerBind.trim()
-    if (this.newListenerBind == "" || this.newListenerName == "") {
+    this.newListenerName = this.newListenerName.trim();
+    this.newListenerBind = this.newListenerBind.trim();
+    if(this.newListenerBind == "" || this.newListenerName == "") {
       return;
     }
     console.log(`Add listener ${this.newListenerName} => ${this.newListenerBind}`)
-    var find = this.listenersList.filter((it) => it[0] == this.newListenerName)
-    if (find.length == 0) {
-      this.listenersList.push([this.newListenerName, { bind: this.newListenerBind, policy: "DENY", target_port: this.newTargetPort, max_idle_time_ms: this.newMaxIdleTimeMs, rules: { static_hosts: [], patterns: [] } }])
-      var tmp = this.listenersList.filter((it) => true)
+    var find = this.listenersList.filter((it) => it[0] == this.newListenerName);
+    if(find.length == 0) {
+      this.listenersList.push([this.newListenerName, {bind: this.newListenerBind, targets:[]}]);
+      var tmp = this.listenersList.filter((it) => true);
       tmp.sort((a, b) => {
         return a[0].localeCompare(b[0])
       })
-      this.listenersList = tmp
+      this.listenersList = tmp;
       console.log(`${this.listenersList}`)
       this.newListenerBind = ""
       this.newListenerName = ""
-      this.newTargetPort = 443
-      this.newMaxIdleTimeMs = 3600000
-      console.log("FOrm reset")
     } else {
-      console.log("Name already exists")
+      console.log("Name already exists");
     }
   }
-  replaceDns(from: string, to: string) {
-    from = from.trim()
-    to = to.trim()
+  replaceDns(from:string, to:string) {
+    from = from.trim();
+    to = to.trim();
 
-    var removed = this.dns.filter((it) => it[0] != from)
-    if (to != "") {
+    var removed = this.dns.filter((it) => it[0] != from);
+    if(to != "") {
       removed.push([from, to])
     }
-    removed.sort((a, b) => {
+    removed.sort((a,b) => {
       return a[0].localeCompare(b[0])
     })
     this.dns = removed;
   }
-  setListener(data: Listeners) {
+  setListener(data:Listeners) {
     console.log(`Setting listener ${data} ${JSON.stringify(data)}`)
-    var listenersListLocal: [string, Listener][] = [];
+    var listenersListLocal:[string, Listener][] = [];
     for (const key in data) {
       const value = data[key]!
       listenersListLocal.push([key, value])
@@ -336,9 +314,9 @@ export class ConfigurationComponent implements OnInit {
     this.listenersList = listenersListLocal
   }
 
-  setDNS(data: DNS) {
+  setDNS(data:DNS) {
     console.log(`Setting DNS ${data} ${JSON.stringify(data)}`)
-    var dnsListLocal: [string, string][] = [];
+    var dnsListLocal:[string, string][] = [];
     for (const key in data) {
       const value = data[key]!
       dnsListLocal.push([key, value])
@@ -350,106 +328,52 @@ export class ConfigurationComponent implements OnInit {
     this.dns = dnsListLocal
   }
 
-  editPattern(name: string, target: string, event: MatChipEditedEvent) {
+  editTarget(name:string, target: string, event: MatChipEditedEvent) {
     const value = event.value.trim();
     console.log(`edit ${name} -> ${target} -> ${value}`);
 
     // Remove fruit if it no longer has a name
     if (!value) {
-      this.removePattern(name, target);
+      this.removeTarget(name, target);
       return;
     }
 
-    this.replacePattern(name, target, value);
+    this.replaceTarget(name, target, value);
     // Edit existing fruit
   }
 
-  addPatternEvent(name: string, event: MatChipInputEvent) {
+  addTargetEvent(name:string, event:MatChipInputEvent) {
     const value = event.value.trim();
-    if (value != "") {
-      this.addPattern(name, value);
+    if(value != "") {
+      this.addTarget(name, value);
     }
     event.chipInput!.clear();
   }
 
-  removePattern(name: string, target: string) {
-    this.replacePattern(name, target, "")
+  removeTarget(name:string, target:string) {
+    this.replaceTarget(name, target, "")
   }
 
-  addPattern(name: string, target: string) {
+  addTarget(name:string, target:string) {
     const index = this.targetIndex(name)
-    if (index != -1) {
+    if(index != -1) {
       const element = this.listenersList[index]
-      const targets = element[1].rules.patterns;
-      if (!targets.includes(target)) {
+      const targets = element[1].targets;
+      if(!targets.includes(target)) {
         targets.push(target);
       }
     }
   }
-  replacePattern(name: string, target: string, new_value: string) {
+  replaceTarget(name:string, target:string, new_value:string) {
     const index = this.targetIndex(name)
-    if (index != -1) {
+    if(index != -1) {
       const element = this.listenersList[index]
-      const targets = element[1].rules.patterns;
-      if (new_value == "") {
-        element[1].rules.patterns = targets.filter((i) => i != target)
+      const targets = element[1].targets;
+      if(new_value == "") {
+        element[1].targets = targets.filter((i) => i != target)
       } else {
-        element[1].rules.patterns = targets.map((i) => {
-          if (i == target) {
-            return new_value;
-          } else {
-            return i;
-          }
-        })
-      }
-    }
-  }
-  editStaticHost(name: string, target: string, event: MatChipEditedEvent) {
-    const value = event.value.trim();
-    console.log(`edit ${name} -> ${target} -> ${value}`);
-
-    // Remove fruit if it no longer has a name
-    if (!value) {
-      this.removeStaticHost(name, target);
-      return;
-    }
-
-    this.replaceStaticHost(name, target, value);
-    // Edit existing fruit
-  }
-
-  addStaticHostEvent(name: string, event: MatChipInputEvent) {
-    const value = event.value.trim();
-    if (value != "") {
-      this.addStaticHost(name, value);
-    }
-    event.chipInput!.clear();
-  }
-
-  removeStaticHost(name: string, target: string) {
-    this.replaceStaticHost(name, target, "")
-  }
-
-  addStaticHost(name: string, target: string) {
-    const index = this.targetIndex(name)
-    if (index != -1) {
-      const element = this.listenersList[index]
-      const targets = element[1].rules.static_hosts;
-      if (!targets.includes(target)) {
-        targets.push(target);
-      }
-    }
-  }
-  replaceStaticHost(name: string, target: string, new_value: string) {
-    const index = this.targetIndex(name)
-    if (index != -1) {
-      const element = this.listenersList[index]
-      const targets = element[1].rules.static_hosts;
-      if (new_value == "") {
-        element[1].rules.static_hosts = targets.filter((i) => i != target)
-      } else {
-        element[1].rules.static_hosts = targets.map((i) => {
-          if (i == target) {
+        element[1].targets = targets.map((i) => {
+          if(i == target) {
             return new_value;
           } else {
             return i;
@@ -459,10 +383,10 @@ export class ConfigurationComponent implements OnInit {
     }
   }
 
-  targetIndex(name: string): number {
+  targetIndex(name:string):number {
     var rindex = -1;
     this.listenersList.forEach((element, index) => {
-      if (element[0] == name) {
+      if(element[0] == name) {
         rindex = index;
       }
     })

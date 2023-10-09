@@ -1,4 +1,4 @@
-# TLS Proxy with a UI
+# Port forwarder with a UI
 
 # Configuration UI
 Online edit via Admin server
@@ -31,9 +31,9 @@ $ cargo build --release
 # Running
 ## Directory structure
 
-You should build your tls proxy using `$ cargo build --release`
+You should build your port forwarder using `$ cargo build --release`
 
-And copy `target/release/tlsproxy` to a separate folder.
+And copy `target/release/portforwarder` to a separate folder.
 
 In the same folder, you should also copy the following files:
 
@@ -80,7 +80,7 @@ appenders:
     kind: console
   default:
     kind: rolling_file
-    path: "tlsproxy.log"
+    path: "portforwarder.log"
     append: true
     encoder:
       pattern: "{d(%Y-%m-%d %H:%M:%S%.3f %Z)} {M} {({l}):5.5} {f}:{L} - {m}{n}"
@@ -91,7 +91,7 @@ appenders:
         limit: 10 mb
       roller:
         kind: fixed_window
-        pattern: "tlsproxy.{}.log.gz"
+        pattern: "portforwarder.{}.log.gz"
         count: 20
         base: 1
 root:
@@ -101,7 +101,7 @@ root:
     - stdout
 
 loggers:
-  tlsproxy:
+  portforwarder:
     level: info
     appenders:
       - default
@@ -112,15 +112,15 @@ loggers:
 Sample systemd unit file
 ```yaml
 [Unit]
-Description=The TLS Proxy
+Description=The port forwarder
 After=syslog.target network-online.target remote-fs.target nss-lookup.target
 Wants=network-online.target
         
 [Service]
 Type=simple
-WorkingDirectory=/opt/services/tlsproxy
-PIDFile=/opt/services/tlsproxy/tlsproxy.pid
-ExecStart=/opt/services/tlsproxy/tlsproxy
+WorkingDirectory=/opt/services/portforwarder
+PIDFile=/opt/services/portforwarder/portforwarder.pid
+ExecStart=/opt/services/portforwarder/portforwarder
 # ExecStop=/bin/kill -s QUIT $MAINPID
 PrivateTmp=true
         
@@ -137,3 +137,5 @@ Visit your server at http://host:48888 to start managing.
 If prompted for Basic auth, please enter the username and password
 
 # Enjoy
+
+

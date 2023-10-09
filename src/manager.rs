@@ -5,13 +5,13 @@ use crate::listener_stats::StatsSerde;
 use crate::runner::Runner;
 use crate::{
     config::Config,
+    healthcheck,
     listener_stats::ListenerStats,
     resolver,
 };
 use anyhow::{anyhow, Result};
 use lazy_static::lazy_static;
 use log::{info, warn, error};
-use tokio::net::lookup_host;
 use std::sync::Arc;
 use tokio::sync::{RwLock, mpsc};
 #[derive(Debug, PartialEq, Clone)]
@@ -111,10 +111,6 @@ pub async fn start(config: Config) -> Result<HashMap<String, Result<bool>>> {
         warn!("starting manager: failed (still running)");
         return Err(anyhow!("failed to start, still running"));
     }
-    if config.listeners.len() == 0 {
-        warn!("starting manager: failed (no listeners defined)");
-        return Err(anyhow!("failed to start, no listener"));
-    }
     {
         let mut listeners = LISTENERS.write().await;
         let mut listener_status = LISTENERS_STATUS.write().await;
@@ -125,37 +121,21 @@ pub async fn start(config: Config) -> Result<HashMap<String, Result<bool>>> {
     *status = Status::STARTING;
 
     resolver::init(&config).await;
+    healthcheck::init(&config).await;
+    let controller_clone = Arc::clone(&CONTROLLER);
+    healthcheck::start_checker(controller_clone).await;
 
     let config_x = Arc::new(RwLock::new(config.clone()));
     let (tx, mut rx) = mpsc::channel(config.listeners.len());
-    let self_ips = config.options.self_ips.clone();
-    let mut self_addresses = Vec::new();
-    for next_host in self_ips {
-        let next_host = format!("{next_host}:9999");
-        let addresses = lookup_host(&next_host).await;
-        match addresses {
-            Err(cause) => {
-                error!("unable to resolve {next_host}:{cause}");
-            },
-            Ok(addresses) => {
-                for next_address in addresses {
-                    self_addresses.push(next_address);
-                }
-            }
-        }
-    }
-    let self_addresses = Arc::new(self_addresses);
     for (name, listener) in &config.listeners {
         let name = name.clone();
         let local_config = Arc::clone(&config_x);
         let controller_local = Arc::clone(&CONTROLLER);
-        let self_addresses = Arc::clone(&self_addresses);
         let r = Runner::new(
             name.clone(),
             listener.clone(),
             local_config,
             controller_local,
-            self_addresses,
         );
     
         let context = r.start();

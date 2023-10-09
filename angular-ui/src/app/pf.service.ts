@@ -61,15 +61,7 @@ type ErrorFunc<T> = (error: any) => Observable<T>;
 
 export interface Listener {
   bind: string,
-  target_port: number,
-  policy: string,
-  rules: Rules,
-  max_idle_time_ms: number,
-}
-
-export interface Rules {
-  static_hosts: string[]
-  patterns: string[]
+  targets: string[]
 }
 //{"test1":{"Ok":true},"awefawef":{"Err":{"message":"invalid socket address"}},"l1":{"Ok":true}}
 export interface ListenerErrorMessage {

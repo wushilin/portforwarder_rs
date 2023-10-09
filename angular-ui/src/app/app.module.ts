@@ -25,7 +25,6 @@ import { MatChipsModule } from '@angular/material/chips';
 import { MatIconModule } from '@angular/material/icon';
 import { MatInputModule } from '@angular/material/input';
 import { MatToolbarModule } from '@angular/material/toolbar';
-import { MatButtonToggleModule } from '@angular/material/button-toggle';
 @NgModule({
   declarations: [
     ConfigurationComponent,
@@ -37,7 +36,6 @@ import { MatButtonToggleModule } from '@angular/material/button-toggle';
   ],
   imports: [
     MatToolbarModule,
-    MatButtonToggleModule,
     MatTableModule,
     MatInputModule,
     MatIconModule,
