@@ -5,7 +5,6 @@ use crate::listener_stats::StatsSerde;
 use crate::runner::Runner;
 use crate::{
     config::Config,
-    healthcheck,
     listener_stats::ListenerStats,
     resolver,
 };
@@ -111,6 +110,10 @@ pub async fn start(config: Config) -> Result<HashMap<String, Result<bool>>> {
         warn!("starting manager: failed (still running)");
         return Err(anyhow!("failed to start, still running"));
     }
+    if config.listeners.len() == 0 {
+        warn!("starting manager: failed (no listeners defined)");
+        return Err(anyhow!("failed to start, no listener"));
+    }
     {
         let mut listeners = LISTENERS.write().await;
         let mut listener_status = LISTENERS_STATUS.write().await;
@@ -121,9 +124,6 @@ pub async fn start(config: Config) -> Result<HashMap<String, Result<bool>>> {
     *status = Status::STARTING;
 
     resolver::init(&config).await;
-    healthcheck::init(&config).await;
-    let controller_clone = Arc::clone(&CONTROLLER);
-    healthcheck::start_checker(controller_clone).await;
 
     let config_x = Arc::new(RwLock::new(config.clone()));
     let (tx, mut rx) = mpsc::channel(config.listeners.len());

@@ -45,7 +45,7 @@ impl Default for AuthenticationRequired {
             body: "Please login".into(),
             header: Header::new(
                 "WWW-authenticate",
-                "Basic realm=\"Port Forwarder ACE\", charset=\"UTF-8\"",
+                "Basic realm=\"TLS Proxy ACE\", charset=\"UTF-8\"",
             ),
         }
     }

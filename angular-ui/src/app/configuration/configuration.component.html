@@ -41,40 +41,95 @@
       <!-- Position Column -->
       <ng-container matColumnDef="name">
         <th mat-header-cell *matHeaderCellDef> Name </th>
-        <td mat-cell *matCellDef="let element"> 
-          <button mat-raised-button color="warn" (click)="deleteListener(element[0])">Delete</button>
+        <td mat-cell *matCellDef="let element">
+          <span (click)="deleteListener(element[0])" style="cursor:pointer">
+            <svg xmlns="http://www.w3.org/2000/svg" height="24" viewBox="0 0 24 24" width="24"><path d="M0 0h24v24H0z" fill="none"/><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+          </span>
           &nbsp;
           &nbsp;
           &nbsp;
-          {{element[0]}} 
+          <mat-label>{{element[0]}}</mat-label>
         </td>
       </ng-container>
 
       <!-- Name Column -->
       <ng-container matColumnDef="bind">
         <th mat-header-cell *matHeaderCellDef> Bind Address </th>
-        <td mat-cell *matCellDef="let element"> {{element[1].bind}} </td>
+        <td mat-cell *matCellDef="let element">
+          <mat-form-field>
+            <mat-label>Bind Address</mat-label>
+            <input type="text" matInput [(ngModel)]="element[1].bind" name="targetBind">
+          </mat-form-field>
+        </td>
       </ng-container>
-
+      <ng-container matColumnDef="targetPort">
+        <th mat-header-cell *matHeaderCellDef> Target Port </th>
+        <td mat-cell *matCellDef="let element">
+          <mat-form-field>
+            <mat-label>Remote Port</mat-label>
+            <input type="number" matInput [(ngModel)]="element[1].target_port" name="targetPort">
+          </mat-form-field>
+        </td>
+      </ng-container>
+      <ng-container matColumnDef="policy">
+        <th mat-header-cell *matHeaderCellDef> Policy for hosts</th>
+        <td mat-cell *matCellDef="let element">
+          <mat-button-toggle-group [(ngModel)]="element[1].policy" aria-label="Favorite Color">
+            <mat-button-toggle value="ALLOW">Allow</mat-button-toggle>
+            <mat-button-toggle value="DENY">Deny</mat-button-toggle>
+          </mat-button-toggle-group>
+        </td>
+      </ng-container>
+      <ng-container matColumnDef="maxIdleTime">
+        <th mat-header-cell *matHeaderCellDef> Max Idle MS </th>
+        <td mat-cell *matCellDef="let element">
+          <mat-form-field>
+            <mat-label>Max Idle ms</mat-label>
+            <input type="number" matInput [(ngModel)]="element[1].max_idle_time_ms" name="maxIdle">
+          </mat-form-field>
+        </td>
+      </ng-container>
       <!-- Weight Column -->
-      <ng-container matColumnDef="targets">
-        <th mat-header-cell *matHeaderCellDef> Target Addresses </th>
+      <ng-container matColumnDef="rulesHosts">
+        <th mat-header-cell *matHeaderCellDef> Static Host Set </th>
         <td mat-cell *matCellDef="let element">
           <mat-form-field class="example-chip-list" style="width:100%; background-color:#ffffff;">
-            <mat-chip-grid #chipGrid aria-label="Enter targets">
-              <div *ngFor="let target of element[1].targets" style="flex-basis: 100%">
-                <mat-chip-row color="primary" highlighted (removed)="removeTarget(element[0], target)" [editable]="true"
-                  (edited)="editTarget(element[0], target, $event)"
+            <mat-chip-grid #chipGrid aria-label="Static Hosts">
+              <div *ngFor="let target of element[1].rules.static_hosts" style="flex-basis: 100%">
+                <mat-chip-row color="primary" highlighted (removed)="removeStaticHost(element[0], target)"
+                  [editable]="true" (edited)="editStaticHost(element[0], target, $event)"
                   [aria-description]="'press enter to edit ' + target">
-                  <div style="font-size: 20px; font-weight: bold;">{{target}}</div>
+                  <div style="font-weight: bold;">{{target}}</div>
                   <button matChipRemove [attr.aria-label]="'remove ' + target">
                     <mat-icon>cancel</mat-icon>
                   </button>
                 </mat-chip-row>
               </div>
-              <input placeholder="New target..." [matChipInputFor]="chipGrid"
+              <input placeholder="New static host..." [matChipInputFor]="chipGrid"
                 [matChipInputSeparatorKeyCodes]="separatorKeysCodes" [matChipInputAddOnBlur]="targetAddOnBlur"
-                (matChipInputTokenEnd)="addTargetEvent(element[0], $event)" />
+                (matChipInputTokenEnd)="addStaticHostEvent(element[0], $event)" />
+            </mat-chip-grid>
+          </mat-form-field>
+        </td>
+      </ng-container>
+      <ng-container matColumnDef="rulesPatterns">
+        <th mat-header-cell *matHeaderCellDef> Regex Patterns </th>
+        <td mat-cell *matCellDef="let element">
+          <mat-form-field class="example-chip-list" style="width:100%; background-color:#ffffff;">
+            <mat-chip-grid #chipGrid aria-label="Regex Patterns">
+              <div *ngFor="let target of element[1].rules.patterns" style="flex-basis: 100%">
+                <mat-chip-row color="primary" highlighted (removed)="removePattern(element[0], target)"
+                  [editable]="true" (edited)="editPattern(element[0], target, $event)"
+                  [aria-description]="'press enter to edit ' + target">
+                  <div style="font-weight: bold;">{{target}}</div>
+                  <button matChipRemove [attr.aria-label]="'remove ' + target">
+                    <mat-icon>cancel</mat-icon>
+                  </button>
+                </mat-chip-row>
+              </div>
+              <input placeholder="New regex..." [matChipInputFor]="chipGrid"
+                [matChipInputSeparatorKeyCodes]="separatorKeysCodes" [matChipInputAddOnBlur]="targetAddOnBlur"
+                (matChipInputTokenEnd)="addPatternEvent(element[0], $event)" />
             </mat-chip-grid>
           </mat-form-field>
         </td>
@@ -92,22 +147,30 @@
       <mat-label>Add a new Listener</mat-label>
 
       <form class="example-form">
-        <mat-form-field class="example-full-width">
-          <mat-label>Listener Name</mat-label>
-          <input matInput placeholder="SSH" [(ngModel)]="newListenerName">
-        </mat-form-field>
-        &nbsp;
-        &nbsp;
-        &nbsp;
-        &nbsp;
-        <mat-form-field class="example-full-width">
-          <mat-label>Bind address</mat-label>
-          <input matInput placeholder="127.0.0.1:1443" [(ngModel)]="newListenerBind">
-        </mat-form-field>
-        &nbsp;
-        &nbsp;
-        &nbsp;
-        &nbsp;
+        <div>
+          <mat-form-field class="example-full-width" name="listenerName">
+            <mat-label>Listener Name</mat-label>
+            <input matInput name="listenerName" placeholder="SSH" [(ngModel)]="newListenerName">
+          </mat-form-field>
+        </div>
+        <div>
+          <mat-form-field class="example-full-width" name="bindAddress">
+            <mat-label>Bind address</mat-label>
+            <input matInput name="bindAddress" placeholder="127.0.0.1:1443" [(ngModel)]="newListenerBind">
+          </mat-form-field>
+        </div>
+        <div>
+          <mat-form-field class="example-full-width" name="targetPort">
+            <mat-label>Target Port</mat-label>
+            <input matInput name="targetPort" type="number" placeholder="443" [(ngModel)]="newTargetPort">
+          </mat-form-field>
+        </div>
+        <div>
+          <mat-form-field class="example-full-width" name="maxIdle">
+            <mat-label>Max Idle Milliseconds</mat-label>
+            <input matInput name="maxIdle" type="number" placeholder="0" [(ngModel)]="newMaxIdleTimeMs">
+          </mat-form-field>
+        </div>
         <button mat-raised-button color="primary" (click)="addListener()">Add</button>
       </form>
     </div>
@@ -150,7 +213,9 @@
       <ng-container matColumnDef="action">
         <th mat-header-cell *matHeaderCellDef> Action </th>
         <td mat-cell *matCellDef="let element">
-          <button mat-raised-button color="warn" (click)="replaceDns(element[0], '')">Delete</button>
+          <span (click)="replaceDns(element[0], '')" style="cursor:pointer">
+            <svg xmlns="http://www.w3.org/2000/svg" height="24" viewBox="0 0 24 24" width="24"><path d="M0 0h24v24H0z" fill="none"/><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+          </span>
         </td>
       </ng-container>
       <tr mat-header-row *matHeaderRowDef="dnsDisplayedColumns"></tr>

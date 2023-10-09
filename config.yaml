@@ -1,34 +1,16 @@
 listeners:
-  abc3:
-    bind: 0.0.0.0:4003
-    targets: []
-  abc:
-    bind: 0.0.0.0:40001
-    targets: []
-  abc1:
-    bind: 0.0.0.0:4002
-    targets: []
-  awfwaef:
-    bind: 0.0.0.0:22
-    targets: []
-  abc2:
-    bind: 0.0.0.0:4004
-    targets: []
-  google:
+  SSH:
     bind: 0.0.0.0:1443
-    targets:
-    - 192.168.33.42:80
-    - www.google.com:443
-    - aafawefwef:22
-    - 192.168.44.113:2332
+    target_port: 443
+    policy: DENY
+    rules:
+      static_hosts: []
+      patterns:
+      - ^www.g.*$
+    max_idle_time_ms: 3600000
 options:
-  health_check_timeout_ms: 4000
   log_config_file: log4rs.yaml
-  max_idle_time_ms: 1000000
-dns:
-  other: good
-  what???: 192.168.44.101:443
-  aaaa: basdf
+dns: {}
 admin_server:
   bind_address: 0.0.0.0
   bind_port: 48888

@@ -1,5 +1,4 @@
 use crate::controller::Controller;
-use crate::healthcheck;
 use crate::idletracker::IdleTracker;
 use anyhow::anyhow;
 use anyhow::Result;
@@ -21,6 +20,7 @@ use crate::{
     config::{Config, Listener},
     listener_stats::ListenerStats,
     resolver,
+    tlsheader,
 };
 
 lazy_static! {
@@ -54,10 +54,9 @@ impl Runner {
     pub async fn start(self) -> Result<Arc<ListenerStats>> {
         let bind = self.listener.bind.clone();
         let name = self.name.clone();
-        let targets = self.listener.targets.clone();
-        let mut targets_new = Vec::<String>::new();
-        targets_new.extend(targets.clone());
-        let idle_timeout_ms = self.config.read().await.options.max_idle_time_ms;
+        let listener_config = self.listener;
+        let listener_config = Arc::new(listener_config);
+        let idle_timeout_ms = listener_config.max_idle_time_ms();
         let stats = ListenerStats::new(&self.name, idle_timeout_ms);
         let stats = Arc::new(stats);
         let root_context_clone = Arc::clone(&self.controller);
@@ -87,7 +86,7 @@ impl Runner {
                         let result = Self::run_listener(
                             name_clone,
                             inner_listener,
-                            targets_new,
+                            listener_config,
                             stats_clone,
                             controller_clone,
                         ).await;
@@ -136,17 +135,16 @@ impl Runner {
     async fn run_listener(
         name: String,
         listener: TcpListener,
-        targets: Vec<String>,
+        listener_config: Arc<Listener>,
         stats: Arc<ListenerStats>,
         controller: Arc<RwLock<Controller>>,
     ) -> Result<()> {
-        let targets_vec = Arc::new(targets);
         let name = Arc::new(name);
         loop {
             let (socket, _) = listener.accept().await?;
             let conn_id = id();
-            let target_vec_clone = Arc::clone(&targets_vec);
             let stats = Arc::clone(&stats);
+            let listener_config = Arc::clone(&listener_config);
             let controller_clone = Arc::clone(&controller);
             let mut controller_inner = controller_clone.write().await;
             let controller_clone_inner = Arc::clone(&controller);
@@ -161,11 +159,11 @@ impl Runner {
                         return;
                     }
                     let addr = addr.unwrap();
-                    info!("{conn_id} new connection from {addr:?} active {new_active} total {new_total}");
+                    info!("{conn_id} ({name}) new connection from {addr:?} active {new_active} total {new_total}");
 
                 }
                 let stats_local_clone = Arc::clone(&stats_local);
-                let rr = Self::worker(name, conn_id, target_vec_clone, socket, stats_local_clone, controller_clone_inner).await;
+                let rr = Self::worker(name, conn_id, listener_config, socket, stats_local_clone, controller_clone_inner).await;
                 if rr.is_err() {
                     let err = rr.err().unwrap();
                     warn!("{conn_id} connection error: {err}");
@@ -179,36 +177,113 @@ impl Runner {
         }
     }
 
+    async fn read_header_with_timeout(socket:&mut TcpStream, timeout:Duration, buffer:&mut[u8]) -> Option<usize> {
+        let read_future = Self::must_read_header(socket, buffer);
+        let result = tokio::time::timeout(timeout, read_future).await;
+        match result {
+            Ok(inner) => {
+                inner
+            },
+            _ => {
+                None
+            }
+        }
+    }
+
+    async fn must_read_header(socket:&mut TcpStream, buffer:&mut[u8]) -> Option<usize> {
+        let mut read_count: usize = 0;
+        loop {
+            let read_result = socket.read(&mut buffer[read_count..]).await;
+            match read_result {
+                Ok(nread) => {
+                    if nread == 0 {
+                        // end of file closed
+                        return None;
+                    }
+                    read_count += nread;
+                    if tlsheader::pre_check(&buffer[..read_count]) {
+                        return Some(read_count);
+                    }
+                },
+                Err(_) => {
+                    return None;
+                }
+            }
+        }
+    }
     async fn worker(
         name: Arc<String>,
         conn_id: u64,
-        targets_all: Arc<Vec<String>>,
+        listener_config: Arc<Listener>,
         socket: TcpStream,
         context: Arc<ListenerStats>,
         controller: Arc<RwLock<Controller>>,
     ) -> Result<()> {
-        // TODO
-        // Selecting from targets_vec, consulting health check
-
-        //let target = targets_vec.get(0).unwrap().clone();
-        let (ok, target) = healthcheck::select(&name, &targets_all).await;
-        if !ok {
-            info!("{conn_id} selected {target} to connect (failed one)");
-        } else {
-            info!("{conn_id} selected {target} to connect");
+        info!("{conn_id} {name} worker started");
+        let mut socket = socket;
+        let mut tlsheader_buffer = vec![0u8; 1024];
+        let timeout = Duration::from_secs(3);
+        let header_len = Self::read_header_with_timeout(&mut socket, timeout, &mut tlsheader_buffer).await;
+        match header_len {
+            None => {
+                info!("{conn_id} tls header timed out after {timeout:?}");
+                return Ok(())
+            },
+            Some(inner) => {
+                info!("{conn_id} tls header read {inner} bytes")
+            }
         }
-        let resolved = resolver::resolve(&target).await;
-        info!("{conn_id} resolved {target} to {resolved}");
+
+        let header_len = header_len.unwrap();
+
+        let sni_host_result = tlsheader::parse(&tlsheader_buffer[..header_len]);
+        match sni_host_result {
+            Err(cause) => {
+                info!("{conn_id} tls header error: {cause}");
+                return Ok(());
+            },
+            _ => {
+
+            }
+        }
+        let client_hello = sni_host_result.unwrap();
+        let sni_target = client_hello.sni_host;
+        info!("{conn_id} sni target is {sni_target}");
+        let check_result = listener_config.is_allowed(&sni_target);
+        match check_result {
+            true => {
+                info!("{conn_id} {sni_target} allowed by ACL");
+            },
+            false => {
+                info!("{conn_id} {sni_target} denied by ACL");
+                return Ok(());
+            }
+        }
+        let resolved = resolver::resolve(&sni_target).await;
+        info!("{conn_id} resolved {sni_target} to {resolved}");
+        let resolved = format!("{resolved}:{}", listener_config.target_port);
         let connect_future = TcpStream::connect(&resolved);
         let r_stream = tokio::time::timeout(Duration::from_secs(5), connect_future).await??;
         let local_addr = r_stream.local_addr()?;
         info!("{conn_id} connected to {resolved} via {local_addr:?}");
         let (lr, lw) = tokio::io::split(socket);
-        let (rr, rw) = tokio::io::split(r_stream);
+        let (rr, mut rw) = tokio::io::split(r_stream);
+
         let idle_tracker = Arc::new(Mutex::new(IdleTracker::new(context.idle_timeout_ms)));
         let context_clone = Arc::clone(&context);
         let uploaded = Arc::new(AtomicU64::new(0));
         let downloaded = Arc::new(AtomicU64::new(0));
+        let header_write_result = rw.write_all(&tlsheader_buffer[..header_len]).await;
+        match header_write_result {
+            Err(cause) => {
+                error!("{conn_id} tls header write error: {cause}");
+                return Ok(());
+            },
+            _ =>{
+                context.increase_uploaded_bytes(header_len);
+                uploaded.fetch_add(header_len as u64, Ordering::SeqCst);
+            }
+        }
         let controller_clone = Arc::clone(&controller);
         let jh1 = Self::pipe(
             conn_id,

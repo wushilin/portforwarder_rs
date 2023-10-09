@@ -1,8 +1,9 @@
-use std::collections::{HashSet, HashMap};
+use std::collections::HashMap;
 use std::error::Error;
+use regex::Regex;
 use tokio::fs;
-use serde::{Serialize, Deserialize};
 use serde_yaml;
+use serde_derive::{Serialize, Deserialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -12,6 +13,50 @@ pub struct Config {
     pub admin_server: Option<AdminServerConfig>,
 }
 
+impl Listener {
+    pub fn max_idle_time_ms(&self) -> u64 {
+        match self.max_idle_time_ms.as_ref() {
+            Some(inner) => {
+                if *inner == 0 {
+                    return u64::MAX;
+                } else {
+                    return *inner;
+                }
+            },
+            None => {
+                return 3600000;
+            }
+        }
+    }
+
+    fn match_host(&self, host:&str) -> bool {
+        for static_host in &self.rules.static_hosts {
+            if host.to_ascii_lowercase() == static_host.to_ascii_lowercase() {
+                return true;
+            }
+        }
+
+        for next_regex in &self.rules.patterns {
+            if next_regex.is_match(host) {
+                return true;
+            }
+        }
+        return false;
+    }
+    pub fn is_allowed(&self, host:&str) -> bool {
+        let json_str = serde_yaml::to_string(&self).unwrap();
+        println!("{json_str}");
+        let matched = self.match_host(host);
+        match self.policy {
+            Policy::ALLOW => {
+                matched
+            }, 
+            Policy::DENY => {
+                !matched
+            }
+        }
+    }
+}
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -85,22 +130,33 @@ impl Config {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Listener {
     pub bind: String,
-    pub targets: HashSet<String>,
+    pub target_port: u16,
+    pub policy: Policy,
+    pub rules: Rules,
+    pub max_idle_time_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Rules {
+    pub static_hosts: Vec<String>,
+    #[serde(with = "serde_regex")]
+    pub patterns: Vec<Regex>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum Policy {
+    ALLOW,
+    DENY
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Options {
-    pub health_check_timeout_ms: u64,
     pub log_config_file: String,
-    pub max_idle_time_ms: u64,
 }
 
 impl Default for Options {
     fn default() -> Self {
         Self {
-            health_check_timeout_ms: 0,
             log_config_file: "".into(),
-            max_idle_time_ms: 0
         }
     }
 }
