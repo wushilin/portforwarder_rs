@@ -44,8 +44,6 @@ impl Listener {
         return false;
     }
     pub fn is_allowed(&self, host:&str) -> bool {
-        let json_str = serde_yaml::to_string(&self).unwrap();
-        println!("{json_str}");
         let matched = self.match_host(host);
         match self.policy {
             Policy::ALLOW => {
@@ -151,12 +149,14 @@ pub enum Policy {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Options {
     pub log_config_file: String,
+    pub self_ips: Vec<String>,
 }
 
 impl Default for Options {
     fn default() -> Self {
         Self {
             log_config_file: "".into(),
+            self_ips: Vec::new()
         }
     }
 }

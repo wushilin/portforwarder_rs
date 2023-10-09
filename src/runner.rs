@@ -4,6 +4,8 @@ use anyhow::anyhow;
 use anyhow::Result;
 use lazy_static::lazy_static;
 use log::{info, warn, error};
+use tokio::net::lookup_host;
+use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::{sync::Arc, time::Duration};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -31,6 +33,7 @@ pub struct Runner {
     pub listener: Listener,
     pub config: Arc<RwLock<Config>>,
     pub controller: Arc<RwLock<Controller>>,
+    pub self_addresses: Arc<Vec<SocketAddr>>
 }
 
 fn id() -> u64 {
@@ -42,12 +45,14 @@ impl Runner {
         listener: Listener,
         config: Arc<RwLock<Config>>,
         root_context: Arc<RwLock<Controller>>,
+        self_addresses: Arc<Vec<SocketAddr>>,
     ) -> Runner {
         Runner {
             name,
             listener,
             config,
             controller: root_context,
+            self_addresses
         }
     }
 
@@ -63,7 +68,7 @@ impl Runner {
         let controller_clone = Arc::clone(&self.controller);
         let stats_clone = Arc::clone(&stats);
         let (tx, mut rx) = mpsc::channel(1);
-
+        let self_addresses = Arc::clone(&self.self_addresses);
         let name_clone = name.clone();
         let _ = root_context_clone
             .write()
@@ -89,6 +94,7 @@ impl Runner {
                             listener_config,
                             stats_clone,
                             controller_clone,
+                            self_addresses
                         ).await;
                         match result {
                             Err(cause) => {
@@ -138,9 +144,11 @@ impl Runner {
         listener_config: Arc<Listener>,
         stats: Arc<ListenerStats>,
         controller: Arc<RwLock<Controller>>,
+        self_addresses: Arc<Vec<SocketAddr>>
     ) -> Result<()> {
         let name = Arc::new(name);
         loop {
+            let self_addresses = Arc::clone(&self_addresses);
             let (socket, _) = listener.accept().await?;
             let conn_id = id();
             let stats = Arc::clone(&stats);
@@ -163,7 +171,7 @@ impl Runner {
 
                 }
                 let stats_local_clone = Arc::clone(&stats_local);
-                let rr = Self::worker(name, conn_id, listener_config, socket, stats_local_clone, controller_clone_inner).await;
+                let rr = Self::worker(name, conn_id, listener_config, socket, stats_local_clone, controller_clone_inner, self_addresses).await;
                 if rr.is_err() {
                     let err = rr.err().unwrap();
                     warn!("{conn_id} connection error: {err}");
@@ -218,6 +226,7 @@ impl Runner {
         socket: TcpStream,
         context: Arc<ListenerStats>,
         controller: Arc<RwLock<Controller>>,
+        self_addresses: Arc<Vec<SocketAddr>>,
     ) -> Result<()> {
         info!("{conn_id} {name} worker started");
         let mut socket = socket;
@@ -261,7 +270,26 @@ impl Runner {
         }
         let resolved = resolver::resolve(&sni_target).await;
         info!("{conn_id} resolved {sni_target} to {resolved}");
+
         let resolved = format!("{resolved}:{}", listener_config.target_port);
+        // check self connection
+        let dns_result = lookup_host(&resolved).await;
+        match dns_result {
+            Err(cause) => {
+                warn!("{conn_id} dns error: {cause}");
+                return Ok(());
+            },
+            Ok(addresses) => {
+                for next_address in addresses {
+                    for next_self_address in self_addresses.iter() {
+                        if next_address.ip() == next_self_address.ip() {
+                            warn!("{conn_id} rejected self connection: {}", next_self_address.ip());
+                            return Ok(());
+                        }
+                    }
+                }
+            }
+        }
         let connect_future = TcpStream::connect(&resolved);
         let r_stream = tokio::time::timeout(Duration::from_secs(5), connect_future).await??;
         let local_addr = r_stream.local_addr()?;
@@ -276,7 +304,7 @@ impl Runner {
         let header_write_result = rw.write_all(&tlsheader_buffer[..header_len]).await;
         match header_write_result {
             Err(cause) => {
-                error!("{conn_id} tls header write error: {cause}");
+                warn!("{conn_id} tls header write error: {cause}");
                 return Ok(());
             },
             _ =>{

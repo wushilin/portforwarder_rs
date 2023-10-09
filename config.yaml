@@ -1,7 +1,7 @@
 listeners:
   SSH:
     bind: 0.0.0.0:1443
-    target_port: 443
+    target_port: 1443
     policy: DENY
     rules:
       static_hosts: []
@@ -10,6 +10,9 @@ listeners:
     max_idle_time_ms: 3600000
 options:
   log_config_file: log4rs.yaml
+  self_ips:
+  - 127.0.0.1
+  - me.jungle
 dns: {}
 admin_server:
   bind_address: 0.0.0.0
