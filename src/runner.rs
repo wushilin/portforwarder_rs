@@ -154,13 +154,13 @@ impl Runner {
             controller_inner.spawn(async move {
                 let stats_local = Arc::clone(&stats);
                 {
-                    let new_active = stats_local.increase_conn_count();
-                    let new_total = stats_local.total_count();
                     let addr = socket.peer_addr();
                     if addr.is_err() {
                         return;
                     }
                     let addr = addr.unwrap();
+                    let new_active = stats_local.increase_conn_count();
+                    let new_total = stats_local.total_count();
                     info!("{conn_id} new connection from {addr:?} active {new_active} total {new_total}");
 
                 }
