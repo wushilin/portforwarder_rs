@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use crate::activetracker;
 use crate::controller::Controller;
 use crate::listener_stats::StatsSerde;
 use crate::runner::Runner;
@@ -73,6 +74,7 @@ pub async fn stop() {
     *status = Status::STOPPING;
     listeners.clear();
     listener_status.clear();
+    activetracker::reset().await;
     info!("cancelling all tasks");
     cancel().await;
     info!("all tasks cancelled by controller");
@@ -122,6 +124,7 @@ pub async fn start(config: Config) -> Result<HashMap<String, Result<bool>>> {
 
     resolver::init(&config).await;
     healthcheck::init(&config).await;
+    activetracker::reset().await;
     let controller_clone = Arc::clone(&CONTROLLER);
     healthcheck::start_checker(controller_clone).await;
 

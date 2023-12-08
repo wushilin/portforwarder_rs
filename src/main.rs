@@ -7,6 +7,7 @@ pub mod runner;
 pub mod idletracker;
 pub mod adminserver;
 pub mod controller;
+pub mod activetracker;
 extern crate rocket;
 use std::error::Error;
 use config::Config;

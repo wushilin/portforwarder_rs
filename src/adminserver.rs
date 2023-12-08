@@ -9,7 +9,7 @@ use std::{
 
 use crate::{
     config::{AdminServerConfig, Config as PFConfig, Listener},
-    manager,
+    manager, activetracker,
 };
 use base64::{engine::general_purpose, Engine as _};
 use lazy_static::lazy_static;
@@ -241,6 +241,10 @@ async fn get_listener_status(who: Authenticated) -> Result<String, ISE> {
 #[get("/apiserver/stats/listeners")]
 #[allow(unused_variables)]
 async fn get_listener_stats(who: Authenticated) -> Result<String, ISE> {
+    let stats = activetracker::get_active_list().await;
+    for (id, addr) in stats.iter() {
+        info!("active connection {id} from {addr}");
+    }
     let result = manager::get_listener_stats().await;
     let result = convert_error(serde_json::to_string(&result));
     return result;
