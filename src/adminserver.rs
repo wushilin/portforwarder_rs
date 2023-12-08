@@ -242,6 +242,7 @@ async fn get_listener_status(who: Authenticated) -> Result<String, ISE> {
 #[allow(unused_variables)]
 async fn get_listener_stats(who: Authenticated) -> Result<String, ISE> {
     let stats = activetracker::get_active_list().await;
+    info!("{} connections active", stats.len());
     for (id, addr) in stats.iter() {
         info!("active connection {id} from {addr}");
     }
