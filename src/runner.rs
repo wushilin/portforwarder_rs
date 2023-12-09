@@ -154,17 +154,18 @@ impl Runner {
             let name = Arc::clone(&name);
             controller_inner.spawn(async move {
                 let stats_local = Arc::clone(&stats);
-                {
-                    let addr = socket.peer_addr();
-                    if addr.is_err() {
-                        return;
-                    }
-                    let addr = addr.unwrap();
-                    let new_active = stats_local.increase_conn_count();
-                    let new_total = stats_local.total_count();
-                    activetracker::put(conn_id, addr).await;
-                    info!("{conn_id} new connection from {addr:?} active {new_active} total {new_total}");
+                
+                let addr = socket.peer_addr();
+                if addr.is_err() {
+                    warn!("{conn_id} connection has no peer addr");
+                    return;
                 }
+                let addr = addr.unwrap();
+                let new_active = stats_local.increase_conn_count();
+                let new_total = stats_local.total_count();
+                activetracker::put(conn_id, addr).await;
+                info!("{conn_id} new connection from {addr:?} active {new_active} total {new_total}");
+                
                 let stats_local_clone = Arc::clone(&stats_local);
                 let rr = Self::worker(name, conn_id, target_vec_clone, socket, stats_local_clone, controller_clone_inner).await;
                 if rr.is_err() {
