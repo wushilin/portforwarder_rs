@@ -77,28 +77,29 @@ impl<'r> FromRequest<'r> for Authenticated {
     ) -> rocket::request::Outcome<Self, Self::Error> {
         let authorization = request.headers().get_one("authorization");
         if authorization.is_none() {
-            return rocket::request::Outcome::Failure((Status::Unauthorized, AuthError {}));
+            return rocket::request::Outcome::Error((Status::Unauthorized, AuthError{}));
         }
         let authorization = authorization.unwrap();
         let prefix = "basic";
         if !authorization.to_ascii_lowercase().starts_with(&prefix) {
-            return rocket::request::Outcome::Failure((Status::Unauthorized, AuthError {}));
+            return rocket::request::Outcome::Error((Status::Unauthorized, AuthError{}));
+
         }
         let authorization = &authorization[prefix.len()..];
         let authorization = authorization.trim();
         let decoded = general_purpose::STANDARD.decode(authorization);
         if decoded.is_err() {
-            return rocket::request::Outcome::Failure((Status::Unauthorized, AuthError {}));
+            return rocket::request::Outcome::Error((Status::Unauthorized, AuthError{}));
         }
         let decoded = decoded.unwrap();
         let str_result = String::from_utf8(decoded);
         if str_result.is_err() {
-            return rocket::request::Outcome::Failure((Status::Unauthorized, AuthError {}));
+            return rocket::request::Outcome::Error((Status::Unauthorized, AuthError{}));
         }
         let str = str_result.unwrap();
         let idx = str.find(':');
         if idx.is_none() {
-            return rocket::request::Outcome::Failure((Status::Unauthorized, AuthError {}));
+            return rocket::request::Outcome::Error((Status::Unauthorized, AuthError{}));
         }
         let idx = idx.unwrap();
         let username = &str[0..idx];
@@ -114,7 +115,7 @@ impl<'r> FromRequest<'r> for Authenticated {
                     username: username.into(),
                 });
             } else {
-                return rocket::request::Outcome::Failure((Status::Unauthorized, AuthError {}));
+                return rocket::request::Outcome::Error((Status::Unauthorized, AuthError{}));
             }
         } else {
             return rocket::request::Outcome::Success(Authenticated {
