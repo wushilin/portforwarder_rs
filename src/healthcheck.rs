@@ -115,6 +115,7 @@ async fn check(controller:Arc<RwLock<Controller>>, host: String, timeout: Durati
             resolved = host.clone()
         },
         Some(value) => {
+            info!("actual host for `{host}` is `{value}`");
             resolved = value
         }
     }
