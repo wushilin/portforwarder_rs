@@ -23,12 +23,9 @@ async fn init_inner(new:HashMap<String, String>) {
     config_1.extend(new.clone());
 }
 
-pub async fn resolve(host:&str) -> String {
+pub async fn resolve(host:&str) -> Option<String> {
     let result = CONFIG.read().await;
-    let result = result.get(host);
-    if result.is_none() {
-        return host.into();
-    }
-    let result = result.unwrap().clone();
-    return result;
+    let result = result.get(host)?;
+    let result = result.clone();
+    return Some(result);
 }

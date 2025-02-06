@@ -198,12 +198,22 @@ impl Runner {
         } else {
             info!("{conn_id} selected {target} to connect");
         }
-        let resolved = resolver::resolve(&target).await;
-        info!("{conn_id} resolved {target} to {resolved}");
+        let resolved_opt = resolver::resolve(&target).await;
+        let resolved:String;
+        match resolved_opt {
+            Some(value) => {
+                resolved = value;
+                info!("{conn_id} resolved `{target}` to `{resolved}`");
+            },
+            None => {
+                resolved = target.into();
+                info!("{conn_id} `{target}` did not resolve. using original `{target}`")
+            }
+        }
         let connect_future = TcpStream::connect(&resolved);
         let r_stream = tokio::time::timeout(Duration::from_secs(5), connect_future).await??;
         let local_addr = r_stream.local_addr()?;
-        info!("{conn_id} connected to {resolved} via {local_addr:?}");
+        info!("{conn_id} connected to `{resolved}` via {local_addr:?}");
         let (lr, lw) = tokio::io::split(socket);
         let (rr, rw) = tokio::io::split(r_stream);
         let idle_tracker = Arc::new(Mutex::new(IdleTracker::new(context.idle_timeout_ms)));

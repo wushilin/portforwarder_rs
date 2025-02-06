@@ -108,7 +108,17 @@ pub async fn start_checker(controller:Arc<RwLock<Controller>>) {
 }
 
 async fn check(controller:Arc<RwLock<Controller>>, host: String, timeout: Duration) -> Result<(String, bool), Box<dyn Error>> {
-    let resolved = resolver::resolve(&host).await;
+    let resolved_opt = resolver::resolve(&host).await;
+    let resolved: String;
+    match resolved_opt {
+        None => {
+            resolved = host.clone()
+        },
+        Some(value) => {
+            resolved = value
+        }
+    }
+
     let (tx, mut rx) = mpsc::channel(1);
     controller.write().await.spawn(async move {
         let connect_future = TcpStream::connect(&resolved);
