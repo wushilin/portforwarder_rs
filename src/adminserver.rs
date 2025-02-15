@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap, convert::Infallible, error::Error, fmt::Display, io::Cursor, path::{Path, PathBuf}, sync::Arc
+    collections::HashMap, convert::Infallible, error::Error, fmt::Display, io::Cursor, path::PathBuf, sync::Arc
 };
 
 use crate::{
@@ -14,7 +14,6 @@ use rocket::{config::TlsConfig, Request};
 use rocket::{
     catch, catchers,
     config::{MutualTls, Shutdown},
-    fs::NamedFile,
     get,
     http::{ContentType, Header, Status},
     post, put,
