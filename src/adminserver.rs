@@ -1,10 +1,5 @@
 use std::{
-    collections::HashMap,
-    error::Error,
-    fmt::Display,
-    io::Cursor,
-    path::{Path, PathBuf},
-    sync::Arc,
+    collections::HashMap, convert::Infallible, error::Error, fmt::Display, io::Cursor, path::{Path, PathBuf}, sync::Arc
 };
 
 use crate::{
@@ -14,7 +9,8 @@ use crate::{
 use base64::{engine::general_purpose, Engine as _};
 use lazy_static::lazy_static;
 use log::info;
-use rocket::config::TlsConfig;
+use regex::Regex;
+use rocket::{config::TlsConfig, Request};
 use rocket::{
     catch, catchers,
     config::{MutualTls, Shutdown},
@@ -28,11 +24,99 @@ use rocket::{
 };
 use serde::{Deserialize, Serialize};
 use tokio::{fs::File, io::AsyncWriteExt, sync::RwLock};
+use include_dir::{include_dir, Dir};
+
+static STATIC: Dir<'_> = include_dir!("static");
 
 lazy_static! {
     static ref LOCK: Arc<RwLock<bool>> = Arc::new(RwLock::new(false));
+    static ref RANGE_REGEX:Regex = Regex::new(r"(?i)^bytes\s*=\s*(\d*)\s*-\s*(\d*)\s*$").unwrap();
 }
 
+struct RangeHeader {
+    start: Option<usize>,
+    end: Option<usize>
+}
+
+impl RangeHeader {
+    pub fn has_value(&self) -> bool {
+        return self.start.is_some() || self.end.is_some()
+    }
+
+    pub fn align(&self, max_size: usize) -> (usize, usize) {
+        let mut start = 0;
+        let mut end = max_size;
+        if let Some(this_start) = self.start {
+            start = this_start;
+            if start > max_size {
+                start = max_size;
+            }
+        }
+
+        if let Some(this_end) = self.end {
+            end = this_end;
+            if end > max_size {
+                end = max_size;
+            }
+            if end < start {
+                end = start;
+            }
+        }
+
+        return (start, end);
+    }
+}
+
+#[derive(Debug)]
+struct PartialContent {
+    content: &'static [u8],
+    content_type: ContentType,
+    content_length: usize,
+    range_header: Option<String>,
+}
+
+impl<'r> Responder<'r, 'static> for PartialContent {
+    fn respond_to(self, _: &'r Request<'_>) -> rocket::response::Result<'static> {
+        let mut response = Response::build();
+
+        response
+            .header(self.content_type)
+            .header(Header::new("Content-Length", self.content_length.to_string()))
+            .header(Header::new("Accept-Ranges", "bytes"));
+
+        if let Some(range) = self.range_header {
+            response
+                .header(Header::new("Content-Range", range))
+                .status(Status::PartialContent);
+        } else {
+            response.status(Status::Ok);
+        }
+
+        response.sized_body(self.content_length, Cursor::new(self.content)).ok()
+    }
+}
+#[rocket::async_trait]
+impl<'r> FromRequest<'r> for RangeHeader {
+    type Error = Infallible;
+
+    async fn from_request(
+        request: &'r rocket::Request<'_>,
+    ) -> rocket::request::Outcome<Self, Self::Error> {
+        let range = request.headers().get_one("range");
+        if let Some(range_str) = range {
+            if let Some(caps) = RANGE_REGEX.captures(range_str) {
+                let start = caps.get(1)
+                                .and_then(|m| if !m.as_str().is_empty() { m.as_str().parse::<usize>().ok() } else { None });
+                let end = caps.get(2)
+                              .and_then(|m| if !m.as_str().is_empty() { m.as_str().parse::<usize>().ok() } else { None });
+        
+                // Return the parsed range
+                return rocket::request::Outcome::Success(RangeHeader { start, end });
+            }
+        }
+        return rocket::request::Outcome::Success(RangeHeader{start:None, end:None});
+    }
+}
 #[derive(Responder, Debug, Clone)]
 pub struct AuthenticationRequired {
     pub body: String,
@@ -160,15 +244,42 @@ impl<'r> Responder<'r, 'static> for ISE {
 }
 
 #[get("/<file..>", rank = 9999)]
-async fn static_handler(file: PathBuf, _who: Authenticated) -> Option<NamedFile> {
-    let the_target = NamedFile::open(Path::new("static/").join(file)).await;
-    return the_target.ok();
+async fn static_handler(file: PathBuf, _who: Authenticated, range: RangeHeader) -> Option<PartialContent> {
+    let entry = STATIC.get_file(file)?;
+    let filename = entry.path().file_name()?.to_str()?;
+
+    let content_type = ContentType::from_extension(
+        filename.split('.').last().unwrap_or("")
+    ).unwrap_or(ContentType::Binary);
+
+    let content:&'static[u8] = entry.contents();
+    let total_length = content.len();
+    let (start, end) = range.align(total_length);
+    let partial_content = &content[start..end];
+
+    let content_range = format!("bytes {}-{}/{}", start, end, total_length);
+    if range.has_value() {
+        return Some(PartialContent {
+            content: partial_content,
+            content_type,
+            content_length: partial_content.len(),
+            range_header: Some(content_range),
+        })
+    } else {
+        // Full content
+        return Some(PartialContent {
+            content,
+            content_type,
+            content_length: total_length,
+            range_header: None,
+        })
+    }
 }
 
 #[get("/")]
 #[allow(unused_variables)]
-async fn index(who: Authenticated) -> Option<NamedFile> {
-    static_handler(PathBuf::from("index.html"), who).await
+async fn index(who: Authenticated, range:RangeHeader) -> Option<PartialContent> {
+    static_handler(PathBuf::from("index.html"), who, range).await
 }
 
 #[get("/apiserver/config/listeners")]
