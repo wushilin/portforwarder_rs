@@ -9,6 +9,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::TcpStream;
 use tokio::sync::{RwLock, mpsc};
+
 lazy_static! {
     static ref STATUS: Arc<RwLock<HashMap<String, (bool, DateTime<Local>)>>> =
         Arc::new(RwLock::new(HashMap::new()));
@@ -183,11 +184,11 @@ pub async fn select<'a>(name: &str, what: &'a Vec<String>) -> (bool, &'a str) {
     if candidate.len() == 0 {
         // nothing available
         warn!("listener {name} has no available backend. randomly selecting...");
-        let rand = rand::random::<usize>() % what.len();
+        let rand = rand::random_range(0..what.len());
         let selection = what.get(rand).unwrap();
         return (false, selection);
     } else {
-        let rand = rand::random::<usize>() % candidate.len();
+        let rand = rand::random_range(0..candidate.len());
         let selection = *candidate.get(rand).unwrap();
         return (true, selection);
     }

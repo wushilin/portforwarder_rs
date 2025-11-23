@@ -317,7 +317,7 @@ async fn put_dns_config(who: Authenticated, data: String) -> Result<String, ISE>
     let map: HashMap<String, String> = convert_error(serde_json::from_str(&data))?;
     let mut conf: PFConfig = convert_error(PFConfig::load_file(CONFIG_FILE).await)?;
     conf.dns = map;
-    let yamlout = serde_yaml::to_string(&conf).unwrap();
+    let yamlout = serde_yaml_ng::to_string(&conf).unwrap();
     let mut file_out = convert_error(File::create("config.yaml").await)?;
     let _wr = convert_error(file_out.write_all(yamlout.as_bytes()).await)?;
     Ok(data)
@@ -330,7 +330,7 @@ async fn put_listener_config(who: Authenticated, data: String) -> Result<String,
     let map: HashMap<String, Listener> = convert_error(serde_json::from_str(&data))?;
     let mut conf: PFConfig = convert_error(PFConfig::load_file(CONFIG_FILE).await)?;
     conf.listeners = map;
-    let yamlout = serde_yaml::to_string(&conf).unwrap();
+    let yamlout = serde_yaml_ng::to_string(&conf).unwrap();
     let mut file_out = convert_error(File::create("config.yaml").await)?;
     convert_error(file_out.write_all(yamlout.as_bytes()).await)?;
     Ok(data)
@@ -465,7 +465,7 @@ async fn reset_original_config(who: Authenticated) -> Result<String, ISE> {
     let mut conf: PFConfig = convert_error(PFConfig::load_file(CONFIG_FILE).await)?;
     conf.listeners = old_listeners;
     conf.dns = old_dns;
-    let yamlout = serde_yaml::to_string(&conf).unwrap();
+    let yamlout = serde_yaml_ng::to_string(&conf).unwrap();
     let mut file_out = convert_error(File::create("config.yaml").await)?;
     let _wr = convert_error(file_out.write_all(yamlout.as_bytes()).await)?;
     let json_result = serde_json::to_string("OK").unwrap();
