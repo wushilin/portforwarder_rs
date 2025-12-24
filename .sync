@@ -1,0 +1,2 @@
+noprofile
+copy target/x86_64-unknown-linux-musl/release/portforwarder oss://fleetman/prod/staging/portforwarder/portforwarder
